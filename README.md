@@ -206,6 +206,23 @@ mkdir -p /opt/nova-admin/{data,logs}     # 目录创建即可，其余由流水�
 > 部署钩子的 URL 与项目唯一关联、**无需额外认证**，所以它等同于密码，泄露就要删掉重建。
 > 本项目的流水线采用钩子方式（构建校验通过后才触发），钩子 URL 只存在 GitHub Secrets 里。
 
+**常见问题：部署步骤长时间不结束**
+
+服务器在国内时，`docker build` 拉 `eclipse-temurin:21-jre` 可能极慢甚至挂住。现在流水线已加保护：
+基础镜像单独拉取（15 分钟超时）、`docker compose up` 15 分钟超时、整个 deploy job 30 分钟超时。
+若日志提示拉取超时，任选其一：
+
+```bash
+# 1) 服务器配镜像加速
+sudo tee /etc/docker/daemon.json <<'EOF'
+{"registry-mirrors": ["https://<你的加速地址>"]}
+EOF
+sudo systemctl restart docker
+
+# 2) 或直接换镜像：服务器 .env 里加
+BASE_IMAGE=docker.m.daocloud.io/library/eclipse-temurin:21-jre
+```
+
 **服务器账号**
 
 流水线默认用 `~/nova-admin`（即 `/home/ubuntu/nova-admin`）作为部署目录，不需要 root。

@@ -18,6 +18,7 @@ jobs:
   build:
     name: Build jar
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -43,6 +44,8 @@ jobs:
     name: Deploy to server
     needs: build
     runs-on: ubuntu-latest
+    # 防止在 scp / docker 拉取阶段无限挂起（之前挂过 1 小时）
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -56,6 +59,7 @@ jobs:
         env:
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           CORS_ALLOWED_ORIGINS: ${{ vars.CORS_ALLOWED_ORIGINS || 'https://nova-admin.s.ci64.com' }}
+          BASE_IMAGE: ${{ vars.BASE_IMAGE }}
           ADMIN_VERSION: ${{ github.sha }}
         run: |
           set -euo pipefail
@@ -74,6 +78,7 @@ jobs:
           ADMIN_VERIFY_CHANNEL=log
           ADMIN_VERIFY_REVEAL_CODE=true
           ADMIN_VERSION=${ADMIN_VERSION::7}
+          BASE_IMAGE=${BASE_IMAGE}
           EOF
           echo "已生成 .env.deploy（内容不回显）"
 
@@ -93,12 +98,14 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -p "$PORT" -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
 
-          SSH_OPTS="-p $PORT -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15"
+          SSH_OPTS="-p $PORT -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4"
+          SCP_OPTS="-P $PORT -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4"
 
           # 解析真实部署目录：未配置 DEPLOY_PATH 时用该 SSH 账号的 home（避免写 /opt 没权限）
           REMOTE_HOME="$(ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" 'echo $HOME' 2>/dev/null)"
           REMOTE_HOME="${REMOTE_HOME:-/home/$SSH_USER}"
           DIR="${DEPLOY_PATH:-$REMOTE_HOME/nova-admin}"
+          echo "部署目录：$DIR"
 
           ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" "mkdir -p '$DIR/data' '$DIR/logs'"
 
@@ -109,9 +116,7 @@ jobs:
           fi
 
           # shellcheck disable=SC2086
-          scp -P "$PORT" -o StrictHostKeyChecking=accept-new \
-            $FILES \
-            "$SSH_USER@$SSH_HOST:$DIR/"
+          scp $SCP_OPTS $FILES "$SSH_USER@$SSH_HOST:$DIR/"
 
           ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" "bash -s -- '$DIR'" <<'REMOTE'
           set -euo pipefail
@@ -152,7 +157,26 @@ jobs:
             COMPOSE="$DOCKER-compose"
           fi
 
-          $COMPOSE up -d --build --remove-orphans
+          # 基础镜像：先按需拉取并限时，避免 docker build 在拉取阶段无限等待
+          BASE_IMG="$(awk -F= '/^BASE_IMAGE=/{print $2}' .env 2>/dev/null | tail -1)"
+          BASE_IMG="${BASE_IMG:-eclipse-temurin:21-jre}"
+          echo "基础镜像：$BASE_IMG"
+          if ! $DOCKER image inspect "$BASE_IMG" >/dev/null 2>&1; then
+            echo "本地无该镜像，开始拉取（最长 15 分钟）..."
+            if ! timeout 900 $DOCKER pull "$BASE_IMG"; then
+              echo "拉取失败或超时：$BASE_IMG" >&2
+              echo "处理方式：给服务器配置 Docker 镜像加速（/etc/docker/daemon.json 的 registry-mirrors），" >&2
+              echo "         或在服务器 .env 里设置 BASE_IMAGE=<可达的镜像地址>" >&2
+              exit 1
+            fi
+          fi
+
+          echo "构建并启动容器（最长 15 分钟）..."
+          if ! timeout 900 $COMPOSE up -d --build --remove-orphans; then
+            echo "docker compose up 失败或超时" >&2
+            $COMPOSE logs --tail=80 backend >&2 || true
+            exit 1
+          fi
           $DOCKER image prune -f >/dev/null
 
           # 等健康检查通过（最多 90 秒）；服务器可能没有 curl，逐级降级
