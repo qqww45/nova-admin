@@ -60,8 +60,9 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${JWT_SECRET:-}" ]; then
-            echo "未配置 secrets.JWT_SECRET（staging 启动时会强校验 JWT 密钥）" >&2
-            exit 1
+            # 服务器已有 .env 时不需要该 secret；远程脚本会检查并给出明确提示
+            echo "未配置 secrets.JWT_SECRET：若服务器上已有 ${DEPLOY_PATH:-/opt/nova-admin}/.env 则无影响，否则部署会失败"
+            exit 0
           fi
           umask 077
           cat > .env.deploy <<EOF
@@ -97,8 +98,15 @@ jobs:
 
           ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" "mkdir -p '$DIR/data' '$DIR/logs'"
 
+          # .env.deploy 只在服务器没有 .env 时才需要上传
+          FILES="dist/admin-backend.jar deploy/Dockerfile deploy/docker-compose.yml"
+          if [ -f .env.deploy ]; then
+            FILES="$FILES .env.deploy"
+          fi
+
+          # shellcheck disable=SC2086
           scp -P "$PORT" -o StrictHostKeyChecking=accept-new \
-            dist/admin-backend.jar deploy/Dockerfile deploy/docker-compose.yml .env.deploy \
+            $FILES \
             "$SSH_USER@$SSH_HOST:$DIR/"
 
           ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" "bash -s -- '$DIR'" <<'REMOTE'
@@ -108,9 +116,14 @@ jobs:
 
           # 服务器上没有 .env 时才采用 CI 生成的那份；已存在则保持服务器配置
           if [ ! -f .env ]; then
-            mv .env.deploy .env
-            chmod 600 .env
-            echo "已创建 ${DIR}/.env"
+            if [ -f .env.deploy ]; then
+              mv .env.deploy .env
+              chmod 600 .env
+              echo "已创建 ${DIR}/.env"
+            else
+              echo "缺少 ${DIR}/.env，且未提供 secrets.JWT_SECRET 无法自动生成（至少需要 JWT_SECRET 与 CORS_ALLOWED_ORIGINS）" >&2
+              exit 1
+            fi
           else
             rm -f .env.deploy
             echo "沿用服务器已有 .env"

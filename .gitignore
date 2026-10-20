@@ -24,6 +24,8 @@ deploy/.env
 deploy/data/
 deploy/logs/
 deploy/*.jar
+# CI 在 runner 上临时生成的服务器环境变量文件（含密钥，严禁入库）
+.env.deploy
 .edgeone/
 
 # ============================================
