@@ -133,21 +133,27 @@ jobs:
             echo "沿用服务器已有 .env"
           fi
 
-          if docker compose version >/dev/null 2>&1; then
-            COMPOSE="docker compose"
-          else
-            COMPOSE="docker-compose"
+          # docker 访问：优先直接访问；ubuntu 这类云镜像账号通常有免密 sudo，作为兜底
+          DOCKER="docker"
+          if ! docker info >/dev/null 2>&1; then
+            if sudo -n docker info >/dev/null 2>&1; then
+              DOCKER="sudo -n docker"
+            else
+              echo "该 SSH 账号无法访问 Docker 守护进程。请任选其一：" >&2
+              echo "  1) sudo usermod -aG docker \"$SSH_USER\" 后重新登录" >&2
+              echo "  2) 为该账号配置免密 sudo（ubuntu 镜像默认已支持）" >&2
+              exit 1
+            fi
           fi
 
-          # 该账号必须能访问 Docker 守护进程，否则 docker compose up 会报权限错误
-          if ! docker info >/dev/null 2>&1; then
-            echo "该 SSH 账号无法访问 Docker 守护进程。请将用户加入 docker 组：" >&2
-            echo "  sudo usermod -aG docker \"$SSH_USER\"; 重新登录后生效" >&2
-            exit 1
+          if $DOCKER compose version >/dev/null 2>&1; then
+            COMPOSE="$DOCKER compose"
+          else
+            COMPOSE="$DOCKER-compose"
           fi
 
           $COMPOSE up -d --build --remove-orphans
-          docker image prune -f >/dev/null
+          $DOCKER image prune -f >/dev/null
 
           # 等健康检查通过（最多 90 秒）；服务器可能没有 curl，逐级降级
           probe() {

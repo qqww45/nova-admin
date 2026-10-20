@@ -194,13 +194,26 @@ mvn -f admin-backend/pom.xml -Pprod spring-boot:run -Dspring-boot.run.profiles=p
 mkdir -p /opt/nova-admin/{data,logs}     # 目录创建即可，其余由流水线上传并启动
 ```
 
-**EdgeOne 侧配置**
+**EdgeOne 侧配置**（依据官方文档「触发部署」）
 
 1. 项目关联本 GitHub 仓库（`qqww45/nova-admin`），根目录为 `admin-frontend`，
    构建读取仓库内的 `edgeone.json`（`buildCommand: pnpm build`、`outputDirectory: dist`、SPA rewrites）。
 2. 项目环境变量 `VITE_API_BASE_URL=https://nova-api.s.ci64.com`（与 `.env.production` 一致）。
 3. 绑定域名 `nova-admin.s.ci64.com`。
-4. 生成"构建部署钩子"，把 POST 地址配到仓库 Secrets `EDGEONE_DEPLOY_HOOK`。
+4. 生成"部署钩子"（项目设置 → 部署钩子 → 新建，分支选 `main`），把 POST 地址配到仓库 Secrets `EDGEONE_DEPLOY_HOOK`。
+
+> 文档要点：项目**关联 Git 仓库后，push 到主分支就会自动触发部署**，钩子是可选的补充手段；
+> 部署钩子的 URL 与项目唯一关联、**无需额外认证**，所以它等同于密码，泄露就要删掉重建。
+> 本项目的流水线采用钩子方式（构建校验通过后才触发），钩子 URL 只存在 GitHub Secrets 里。
+
+**服务器账号**
+
+流水线默认用 `~/nova-admin`（即 `/home/ubuntu/nova-admin`）作为部署目录，不需要 root。
+Docker 访问按以下顺序兜底：直接访问 → `sudo -n docker`（ubuntu 云镜像默认有免密 sudo）。
+若两者都不通，会在日志里提示 `usermod -aG docker`。
+若确实要用 `/opt/nova-admin`，先 `sudo mkdir -p /opt/nova-admin && sudo chown ubuntu:ubuntu /opt/nova-admin`，
+并把仓库变量 `DEPLOY_PATH` 设为 `/opt/nova-admin`。
+
 
 **域名**
 
