@@ -52,6 +52,30 @@ jobs:
           name: backend-jar
           path: dist
 
+      - name: Prepare .env (only used when server has none)
+        env:
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          CORS_ALLOWED_ORIGINS: ${{ vars.CORS_ALLOWED_ORIGINS || 'https://nova-admin.s.ci64.com' }}
+          ADMIN_VERSION: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "${JWT_SECRET:-}" ]; then
+            echo "未配置 secrets.JWT_SECRET（staging 启动时会强校验 JWT 密钥）" >&2
+            exit 1
+          fi
+          umask 077
+          cat > .env.deploy <<EOF
+          # 由 GitHub Actions 生成；服务器上已存在 .env 时不会被覆盖
+          JWT_SECRET=${JWT_SECRET}
+          CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS}
+          SPRING_PROFILES_ACTIVE=staging
+          ADMIN_CACHE_TYPE=memory
+          ADMIN_VERIFY_CHANNEL=log
+          ADMIN_VERIFY_REVEAL_CODE=true
+          ADMIN_VERSION=${ADMIN_VERSION::7}
+          EOF
+          echo "已生成 .env.deploy（内容不回显）"
+
       - name: Upload to server and restart container
         env:
           SSH_HOST: ${{ secrets.SSH_HOST }}
@@ -71,11 +95,10 @@ jobs:
 
           SSH_OPTS="-p $PORT -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15"
 
-          # 首次部署时创建目录与 .env（.env 之后由服务器维护，CI 不覆盖）
           ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" "mkdir -p '$DIR/data' '$DIR/logs'"
 
           scp -P "$PORT" -o StrictHostKeyChecking=accept-new \
-            dist/admin-backend.jar deploy/Dockerfile deploy/docker-compose.yml \
+            dist/admin-backend.jar deploy/Dockerfile deploy/docker-compose.yml .env.deploy \
             "$SSH_USER@$SSH_HOST:$DIR/"
 
           ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" "bash -s -- '$DIR'" <<'REMOTE'
@@ -83,9 +106,14 @@ jobs:
           DIR="$1"
           cd "$DIR"
 
+          # 服务器上没有 .env 时才采用 CI 生成的那份；已存在则保持服务器配置
           if [ ! -f .env ]; then
-            echo "缺少 ${DIR}/.env：请先按 deploy/.env.example 创建（至少填 JWT_SECRET 与 CORS_ALLOWED_ORIGINS）" >&2
-            exit 1
+            mv .env.deploy .env
+            chmod 600 .env
+            echo "已创建 ${DIR}/.env"
+          else
+            rm -f .env.deploy
+            echo "沿用服务器已有 .env"
           fi
 
           if docker compose version >/dev/null 2>&1; then
@@ -123,3 +151,24 @@ jobs:
           $COMPOSE logs --tail=80 backend >&2
           exit 1
           REMOTE
+
+      # 公网域名验证：域名还没接入 EdgeOne/服务器时不该让流水线失败，但日志必须看得见
+      - name: Verify API domain
+        continue-on-error: true
+        env:
+          API_URL: ${{ vars.API_URL || 'https://nova-api.s.ci64.com' }}
+        run: |
+          set -uo pipefail
+          for i in $(seq 1 12); do
+            OUT="$(curl -sS --max-time 15 "$API_URL/actuator/health" || true)"
+            case "$OUT" in
+              *'"status":"UP"'*)
+                echo "接口域名可访问：$API_URL -> $OUT"
+                exit 0
+                ;;
+            esac
+            echo "等待接口域名就绪（$i/12）：$API_URL"
+            sleep 5
+          done
+          echo "接口域名未通：请确认 $API_URL 已解析到上海服务器（或已在 EdgeOne 配置回源），并放行 8080" >&2
+          exit 1

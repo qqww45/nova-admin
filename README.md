@@ -169,39 +169,49 @@ mvn -f admin-backend/pom.xml -Pprod spring-boot:run -Dspring-boot.run.profiles=p
 
 **拓扑**
 
-- 前端：EdgeOne 静态托管 → `https://admin.s.ci64.com`
-- 后端：上海 Docker 服务器 → `https://api.s.ci64.com`（容器内 8080）
+- 前端：EdgeOne 静态托管 → `https://nova-admin.s.ci64.com`
+- 后端：上海 Docker 服务器 → `https://nova-api.s.ci64.com`（容器内 8080）
 - 跨域：后端 `CORS_ALLOWED_ORIGINS` 精确放行前端域名；前端构建期注入 `VITE_API_BASE_URL`
 
 **流水线**（`.github/workflows/`，push 到 `main` 按路径触发）
 
 | 工作流 | 触发路径 | 动作 |
 |---|---|---|
-| `deploy-backend.yml` | `admin-backend/**`、`deploy/**` | Maven 打包 → SCP jar → 服务器 `docker compose up -d --build` → 健康检查 |
-| `deploy-frontend.yml` | `admin-frontend/**` | pnpm 安装 → EdgeOne CLI 构建发布 |
+| `deploy-backend.yml` | `admin-backend/**`、`deploy/**` | Maven 打包 → SCP jar → 服务器 `docker compose up -d --build` → 健康检查 → 域名探测 |
+| `deploy-frontend.yml` | `admin-frontend/**` | 本地构建校验 → POST EdgeOne 部署钩子 → 轮询站点可访问 |
 
 仓库需配置：
 
-- Secrets：`SSH_HOST`、`SSH_USER`、`SSH_PRIVATE_KEY`、`SSH_PORT`（可选）、`EDGEONE_API_TOKEN`
-- Variables：`VITE_API_BASE_URL`（默认 `https://api.s.ci64.com`）、`DEPLOY_PATH`（默认 `/opt/nova-admin`）
+- Secrets：`SSH_HOST`、`SSH_USER`、`SSH_PRIVATE_KEY`、`SSH_PORT`（可选）、`JWT_SECRET`（staging 启动强校验，服务器已存在 `.env` 时不会用到）、`EDGEONE_DEPLOY_HOOK`（EdgeOne 项目 → 设置 → 构建部署钩子的 POST 地址）
+- Variables：`VITE_API_BASE_URL`（默认 `https://nova-api.s.ci64.com`）、`API_URL`（默认 `https://nova-api.s.ci64.com`）、`FRONTEND_URL`（默认 `https://nova-admin.s.ci64.com`）、`CORS_ALLOWED_ORIGINS`（默认 `https://nova-admin.s.ci64.com`）、`DEPLOY_PATH`（默认 `/opt/nova-admin`）
 
 **服务器首次部署**
 
+服务器上没有 `.env` 时，流水线会用 `secrets.JWT_SECRET` + `vars.CORS_ALLOWED_ORIGINS` 自动生成一份，
+无需手工准备；已存在 `.env` 则以服务器为准（流水线永不覆盖）。
+
 ```bash
-mkdir -p /opt/nova-admin/{data,logs} && cd /opt/nova-admin
-curl -fsSLO https://raw.githubusercontent.com/<owner>/<repo>/main/deploy/.env.example
-mv .env.example .env && vi .env    # 至少填写 JWT_SECRET 与 CORS_ALLOWED_ORIGINS
-# 之后由流水线上传 jar / Dockerfile / docker-compose.yml 并启动
+mkdir -p /opt/nova-admin/{data,logs}     # 目录创建即可，其余由流水线上传并启动
 ```
 
-`.env` 只存在于服务器，流水线不覆盖；改配置改这里后 `docker compose up -d`。
+**EdgeOne 侧配置**
+
+1. 项目关联本 GitHub 仓库（`qqww45/nova-admin`），根目录为 `admin-frontend`，
+   构建读取仓库内的 `edgeone.json`（`buildCommand: pnpm build`、`outputDirectory: dist`、SPA rewrites）。
+2. 项目环境变量 `VITE_API_BASE_URL=https://nova-api.s.ci64.com`（与 `.env.production` 一致）。
+3. 绑定域名 `nova-admin.s.ci64.com`。
+4. 生成"构建部署钩子"，把 POST 地址配到仓库 Secrets `EDGEONE_DEPLOY_HOOK`。
 
 **域名**
 
-`*.s.ci64.com` 已在 DNS 层 CNAME 到 EdgeOne。因此 `api.s.ci64.com` 需要在 EdgeOne 侧配置为
-"源站 = 上海服务器公网 IP:8080"的加速域名（并关闭 API 路径缓存），
-或单独为 `api` 增加一条指向服务器的 A 记录（需自备证书）。两者选其一，保持与
-`VITE_API_BASE_URL` / `CORS_ALLOWED_ORIGINS` 一致。
+`*.s.ci64.com` 已在 DNS 层 CNAME 到 EdgeOne，因此 `nova-admin.s.ci64.com` 直接可用。
+`nova-api.s.ci64.com` 需要二选一：
+
+- 在 EdgeOne 把 `nova-api.s.ci64.com` 配为加速域名，源站指向上海服务器公网 IP 的 8080（关闭该域名下 API 路径缓存）；
+- 或为 `nova-api` 单独加一条指向服务器 IP 的 A 记录（需自备证书）。
+
+无论哪种，最终都要与 `VITE_API_BASE_URL` / `CORS_ALLOWED_ORIGINS` 保持一致，否则前端请求会跨域失败。
+
 
 ---
 

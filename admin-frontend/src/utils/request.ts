@@ -23,7 +23,7 @@ import router from '@/router';
  * <p>构建期由 VITE_API_BASE_URL 注入，目的只有一个：让"开发代理"与"线上直连"共用同一份代码。
  * <ul>
  *     <li>开发：`/api`，由 Vite devServer 转发到 8080 并剥离前缀；</li>
- *     <li>线上：`https://api.s.ci64.com`（后端未设置 context-path，故不带 /api 前缀）。</li>
+ *     <li>线上：`https://nova-api.s.ci64.com`（后端未设置 context-path，故不带 /api 前缀）。</li>
  * </ul>
  * 末尾斜杠统一去掉，避免拼出 `//refresh` 这类路径。
  */
