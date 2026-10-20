@@ -61,7 +61,7 @@ jobs:
           set -euo pipefail
           if [ -z "${JWT_SECRET:-}" ]; then
             # 服务器已有 .env 时不需要该 secret；远程脚本会检查并给出明确提示
-            echo "未配置 secrets.JWT_SECRET：若服务器上已有 ${DEPLOY_PATH:-/opt/nova-admin}/.env 则无影响，否则部署会失败"
+            echo "未配置 secrets.JWT_SECRET：若服务器上已有 ${DEPLOY_PATH:-~/nova-admin}/.env 则无影响，否则部署会失败"
             exit 0
           fi
           umask 077
@@ -87,7 +87,6 @@ jobs:
         run: |
           set -euo pipefail
           PORT="${SSH_PORT:-22}"
-          DIR="${DEPLOY_PATH:-/opt/nova-admin}"
 
           mkdir -p ~/.ssh
           printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
@@ -95,6 +94,11 @@ jobs:
           ssh-keyscan -p "$PORT" -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
 
           SSH_OPTS="-p $PORT -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15"
+
+          # 解析真实部署目录：未配置 DEPLOY_PATH 时用该 SSH 账号的 home（避免写 /opt 没权限）
+          REMOTE_HOME="$(ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" 'echo $HOME' 2>/dev/null)"
+          REMOTE_HOME="${REMOTE_HOME:-/home/$SSH_USER}"
+          DIR="${DEPLOY_PATH:-$REMOTE_HOME/nova-admin}"
 
           ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" "mkdir -p '$DIR/data' '$DIR/logs'"
 
@@ -133,6 +137,13 @@ jobs:
             COMPOSE="docker compose"
           else
             COMPOSE="docker-compose"
+          fi
+
+          # 该账号必须能访问 Docker 守护进程，否则 docker compose up 会报权限错误
+          if ! docker info >/dev/null 2>&1; then
+            echo "该 SSH 账号无法访问 Docker 守护进程。请将用户加入 docker 组：" >&2
+            echo "  sudo usermod -aG docker \"$SSH_USER\"; 重新登录后生效" >&2
+            exit 1
           fi
 
           $COMPOSE up -d --build --remove-orphans

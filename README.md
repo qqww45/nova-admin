@@ -183,7 +183,7 @@ mvn -f admin-backend/pom.xml -Pprod spring-boot:run -Dspring-boot.run.profiles=p
 仓库需配置：
 
 - Secrets：`SSH_HOST`、`SSH_USER`、`SSH_PRIVATE_KEY`、`SSH_PORT`（可选）、`JWT_SECRET`（staging 启动强校验，服务器已存在 `.env` 时不会用到）、`EDGEONE_DEPLOY_HOOK`（EdgeOne 项目 → 设置 → 构建部署钩子的 POST 地址）
-- Variables：`VITE_API_BASE_URL`（默认 `https://nova-api.s.ci64.com`）、`API_URL`（默认 `https://nova-api.s.ci64.com`）、`FRONTEND_URL`（默认 `https://nova-admin.s.ci64.com`）、`CORS_ALLOWED_ORIGINS`（默认 `https://nova-admin.s.ci64.com`）、`DEPLOY_PATH`（默认 `/opt/nova-admin`）
+- Variables：`VITE_API_BASE_URL`（默认 `https://nova-api.s.ci64.com`）、`API_URL`（默认 `https://nova-api.s.ci64.com`）、`FRONTEND_URL`（默认 `https://nova-admin.s.ci64.com`）、`CORS_ALLOWED_ORIGINS`（默认 `https://nova-admin.s.ci64.com`）、`DEPLOY_PATH`（默认空 → 服务器上该 SSH 账号的 `~/nova-admin`；写 `/opt` 等需 root 权限的目录时请确保 SSH 账号有写权限）
 
 **服务器首次部署**
 
