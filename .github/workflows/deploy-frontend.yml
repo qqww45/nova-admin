@@ -1,6 +1,6 @@
 name: Deploy Frontend (EdgeOne)
 
-# main 分支触发：前端变更才重新发布
+# main 分支触发：只有前端改动才发布
 on:
   push:
     branches: [main]
@@ -14,12 +14,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  deploy:
-    name: Build & deploy to EdgeOne
+  # 先本地构建一次：类型错误 / 依赖问题在流水线里就暴露，不要等 EdgeOne 构建失败
+  verify-build:
+    name: Verify production build
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: admin-frontend
     steps:
       - uses: actions/checkout@v4
 
@@ -34,15 +32,59 @@ jobs:
           cache-dependency-path: admin-frontend/pnpm-lock.yaml
 
       - name: Install dependencies
+        working-directory: admin-frontend
         run: pnpm install --frozen-lockfile
 
-      - name: Install EdgeOne CLI
-        run: npm install -g edgeone@1.6.44
-
-      - name: Deploy
+      - name: Build
+        working-directory: admin-frontend
         env:
-          # 与后端域名保持一致；可在仓库 Variables 中覆盖
+          # 与后端域名保持一致；默认值即当前线上域名，可在仓库 Variables 中覆盖
           VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL || 'https://nova-api.s.ci64.com' }}
-          EDGEONE_PAGES_API_TOKEN: ${{ secrets.EDGEONE_API_TOKEN }}
-          PAGES_SOURCE: skills
-        run: edgeone makers deploy -n nova-admin --json
+        run: pnpm build
+
+  deploy:
+    name: Trigger EdgeOne deploy hook
+    needs: verify-build
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST deploy hook
+        env:
+          EDGEONE_DEPLOY_HOOK: ${{ secrets.EDGEONE_DEPLOY_HOOK }}
+          FRONTEND_URL: ${{ vars.FRONTEND_URL || 'https://nova-admin.s.ci64.com' }}
+        run: |
+          set -euo pipefail
+          if [ -z "${EDGEONE_DEPLOY_HOOK:-}" ]; then
+            echo "未配置 secrets.EDGEONE_DEPLOY_HOOK（EdgeOne 项目 -> 设置 -> 构建部署钩子 生成的 POST 地址）" >&2
+            exit 1
+          fi
+
+          echo "触发 EdgeOne 部署钩子..."
+          curl -fsS -X POST "$EDGEONE_DEPLOY_HOOK" \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: application/json' \
+            -d '{"ref":"main"}' || {
+            echo "钩子调用失败：请确认地址有效、且 EdgeOne 项目已关联本仓库 main 分支" >&2
+            exit 1
+          }
+          echo "钩子已触发，EdgeOne 正在拉取 main 分支构建"
+
+      # 部署是异步的：轮询前端域名直到返回 200。
+      # EdgeOne 首次构建通常 1~3 分钟；超时不阻断流水线（continue-on-error），
+      # 但要能看出站点到底通没通。
+      - name: Verify site reachable
+        continue-on-error: true
+        env:
+          FRONTEND_URL: ${{ vars.FRONTEND_URL || 'https://nova-admin.s.ci64.com' }}
+        run: |
+          set -uo pipefail
+          for i in $(seq 1 36); do
+            CODE="$(curl -sS -o /dev/null -w '%{http_code}' -L --max-time 15 "$FRONTEND_URL" || echo 000)"
+            if [ "$CODE" = "200" ]; then
+              echo "站点可访问：$FRONTEND_URL -> $CODE"
+              exit 0
+            fi
+            echo "等待站点就绪（$i/36）：HTTP $CODE"
+            sleep 5
+          done
+          echo "站点未在 3 分钟内返回 200，请到 EdgeOne 控制台查看构建日志与域名绑定状态" >&2
+          exit 1
