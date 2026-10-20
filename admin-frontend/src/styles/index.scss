@@ -1,0 +1,123 @@
+@use './theme.css';
+@use './element/global.scss';
+
+/**
+ * 全局样式：只放与布局、滚动条、通用容器相关的规则。
+ * 组件内部样式一律写在各自的 <style scoped> 中，避免全局污染。
+ *
+ * 引入顺序说明：theme.css 定义令牌 → element/global.scss 引用令牌做细节兜底，
+ * 两步都先于组件样式，保证"令牌可覆盖、细节不打架"。
+ */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei',
+    'Helvetica Neue', Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  color: var(--admin-text-primary);
+  background-color: var(--admin-bg-color);
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--admin-color-primary);
+  text-decoration: none;
+}
+
+/* 滚动条美化（WebKit）：细、低对比，悬停加深；暗色下跟随 slate 灰阶 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: rgba(144, 147, 153, 0.28);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+
+  &:hover {
+    background-color: rgba(144, 147, 153, 0.5);
+  }
+}
+
+::-webkit-scrollbar-track {
+  background-color: transparent;
+}
+
+html.dark ::-webkit-scrollbar-thumb {
+  background-color: rgba(148, 163, 184, 0.22);
+
+  &:hover {
+    background-color: rgba(148, 163, 184, 0.4);
+  }
+}
+
+/* 文本选中色跟随品牌色，暗色下降低饱和避免刺眼 */
+::selection {
+  background-color: rgba(37, 99, 235, 0.24);
+}
+
+html.dark ::selection {
+  background-color: rgba(96, 165, 250, 0.3);
+}
+
+/* 页面容器：列表页统一内边距与背景（底部多留 8px 呼吸感） */
+.page-container {
+  padding: 16px 16px 24px;
+  background-color: var(--admin-bg-color);
+}
+
+/* 搜索表单与表格之间的通用间距 */
+.table-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+/*
+ * 路由切换动画。
+ *
+ * <p>要点：离场快（0.12s）、入场慢（0.22s），并用位移代替侧滑——
+ * "先快速让位、再从容上浮"的节奏不会出现 out-in 模式下的空白闪屏，
+ * 也不会因页面高度差产生横向跳动。
+ */
+.fade-slide-enter-active {
+  transition:
+    opacity 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.fade-slide-leave-active {
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease;
+}
+
+.fade-slide-enter-from {
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+.fade-slide-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+
+/* 顶部进度条配色跟随主题 */
+#nprogress .bar {
+  background: var(--admin-color-primary) !important;
+}

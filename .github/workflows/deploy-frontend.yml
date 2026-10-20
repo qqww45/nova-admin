@@ -1,0 +1,48 @@
+name: Deploy Frontend (EdgeOne)
+
+# main 分支触发：前端变更才重新发布
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'admin-frontend/**'
+      - '.github/workflows/deploy-frontend.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-frontend
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Build & deploy to EdgeOne
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: admin-frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: admin-frontend/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install EdgeOne CLI
+        run: npm install -g edgeone@1.6.44
+
+      - name: Deploy
+        env:
+          # 与后端域名保持一致；可在仓库 Variables 中覆盖
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL || 'https://api.s.ci64.com' }}
+          EDGEONE_PAGES_API_TOKEN: ${{ secrets.EDGEONE_API_TOKEN }}
+          PAGES_SOURCE: skills
+        run: edgeone makers deploy -n nova-admin --json

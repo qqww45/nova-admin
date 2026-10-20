@@ -1,0 +1,125 @@
+name: Deploy Backend (Shanghai Docker)
+
+# main 分支触发：只改后端或部署文件时才构建，避免前端提交也重启后端
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'admin-backend/**'
+      - 'deploy/**'
+      - '.github/workflows/deploy-backend.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build jar
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Maven package
+        working-directory: admin-backend
+        run: mvn -B -ntp clean package -DskipTests
+
+      - name: Upload jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-jar
+          path: admin-backend/target/admin-backend.jar
+          if-no-files-found: error
+
+  deploy:
+    name: Deploy to server
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download jar
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-jar
+          path: dist
+
+      - name: Upload to server and restart container
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+        run: |
+          set -euo pipefail
+          PORT="${SSH_PORT:-22}"
+          DIR="${DEPLOY_PATH:-/opt/nova-admin}"
+
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p "$PORT" -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+          SSH_OPTS="-p $PORT -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15"
+
+          # 首次部署时创建目录与 .env（.env 之后由服务器维护，CI 不覆盖）
+          ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" "mkdir -p '$DIR/data' '$DIR/logs'"
+
+          scp -P "$PORT" -o StrictHostKeyChecking=accept-new \
+            dist/admin-backend.jar deploy/Dockerfile deploy/docker-compose.yml \
+            "$SSH_USER@$SSH_HOST:$DIR/"
+
+          ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" "bash -s -- '$DIR'" <<'REMOTE'
+          set -euo pipefail
+          DIR="$1"
+          cd "$DIR"
+
+          if [ ! -f .env ]; then
+            echo "缺少 ${DIR}/.env：请先按 deploy/.env.example 创建（至少填 JWT_SECRET 与 CORS_ALLOWED_ORIGINS）" >&2
+            exit 1
+          fi
+
+          if docker compose version >/dev/null 2>&1; then
+            COMPOSE="docker compose"
+          else
+            COMPOSE="docker-compose"
+          fi
+
+          $COMPOSE up -d --build --remove-orphans
+          docker image prune -f >/dev/null
+
+          # 等健康检查通过（最多 90 秒）；服务器可能没有 curl，逐级降级
+          probe() {
+            if command -v curl >/dev/null 2>&1; then
+              curl -fsS http://127.0.0.1:8080/actuator/health 2>/dev/null || true
+            elif command -v wget >/dev/null 2>&1; then
+              wget -qO- http://127.0.0.1:8080/actuator/health 2>/dev/null || true
+            else
+              docker inspect -f '{{.State.Health.Status}}' nova-admin-backend 2>/dev/null || true
+            fi
+          }
+
+          for i in $(seq 1 18); do
+            OUT="$(probe)"
+            case "$OUT" in
+              *'"status":"UP"'*|healthy)
+                echo "backend healthy: $OUT"
+                exit 0
+                ;;
+            esac
+            sleep 5
+          done
+
+          echo "后端 90 秒内未就绪，最近日志：" >&2
+          $COMPOSE logs --tail=80 backend >&2
+          exit 1
+          REMOTE

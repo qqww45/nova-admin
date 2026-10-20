@@ -1,0 +1,47 @@
+# 上海服务器：仅部署后端（前端在 EdgeOne 静态托管）
+#
+# 目录约定（服务器上）：
+#   /opt/nova-admin/
+#     ├── docker-compose.yml
+#     ├── Dockerfile
+#     ├── admin-backend.jar   # CI 上传
+#     ├── .env                # 只存在于服务器，不入库
+#     ├── data/               # SQLite（admin.db）
+#     └── logs/               # 应用日志
+name: nova-admin
+
+services:
+  backend:
+    build:
+      context: .
+      args:
+        # 拉不到 Docker Hub 时可改为国内镜像源
+        BASE_IMAGE: ${BASE_IMAGE:-eclipse-temurin:21-jre}
+    image: nova-admin-backend:${ADMIN_VERSION:-latest}
+    container_name: nova-admin-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # 过渡环境：SQLite + 内存缓存 + 日志验证码通道
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-staging}
+      SERVER_PORT: 8080
+      SQLITE_PATH: /app/data/admin.db
+      LOG_FILE: /app/logs/admin-backend.log
+    ports:
+      # EdgeOne 回源需要公网可达；如改用 Nginx 反代，可收敛为 127.0.0.1:8080
+      - "${BACKEND_PORT:-8080}:8080"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080' || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"

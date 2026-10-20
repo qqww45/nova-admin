@@ -1,0 +1,67 @@
+# ============================================
+# 日志与临时输出文件
+# ============================================
+*.log
+*.err
+admin-backend/logs/
+admin-backend/db/*.db
+admin-backend/db/*.db-shm
+admin-backend/db/*.db-wal
+
+# 调试快照（Playwright 等一次性产物）
+login.yaml
+admin-frontend/online.yaml
+admin-frontend/s1.yaml
+admin-frontend/s2.yaml
+admin-frontend/after-redirect.yaml
+admin-frontend/config.yaml
+admin-frontend/log.yaml
+
+# ============================================
+# 部署（deploy/）
+# ============================================
+deploy/.env
+deploy/data/
+deploy/logs/
+deploy/*.jar
+.edgeone/
+
+# ============================================
+# 前端（admin-frontend）
+# ============================================
+node_modules/
+dist/
+dist-ssr/
+.vite/
+.uno.history
+*.local
+coverage/
+
+# ============================================
+# 后端（admin-backend / Maven）
+# ============================================
+target/
+!.mvn/wrapper/maven-wrapper.jar
+*.class
+
+# ============================================
+# 本地工具链（随环境分发，不入库）
+# ============================================
+.tools/
+
+# ============================================
+# IDE / 编辑器
+# ============================================
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.iml
+*.iws
+*.ipr
+
+# ============================================
+# 操作系统
+# ============================================
+.DS_Store
+Thumbs.db
+desktop.ini

@@ -1,0 +1,89 @@
+## =============================================================================
+## 开发环境配置：SQLite（零安装、开箱即用）
+## 注意：所有 DDL 由 Flyway 管理，禁止在代码中执行建表语句。
+## =============================================================================
+spring:
+  datasource:
+    driver-class-name: org.sqlite.JDBC
+    # SQLite 数据文件放在项目根 ./db/admin.db（已加入 .gitignore）
+    # busy_timeout：并发写时等待 5 秒，避免 SQLITE_BUSY；journal_mode=WAL 提升读写并发
+    url: jdbc:sqlite:./db/admin.db?busy_timeout=5000&journal_mode=WAL
+    username:
+    password:
+    hikari:
+      # SQLite 不支持 isValid() 校验，必须显式指定探活 SQL
+      connection-test-query: SELECT 1
+      maximum-pool-size: 5
+      minimum-idle: 1
+      connection-timeout: 30000
+      # SQLite 单写者模型，默认自动提交即可
+      auto-commit: true
+
+  ## 数据库迁移：启动即自动执行 db/migration 下的版本脚本
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    validate-on-migrate: false
+    # 迁移脚本编码与项目一致
+    encoding: UTF-8
+    clean-disabled: true
+
+  ## MyBatis-Plus
+  mybatis-plus:
+    configuration:
+      # 下划线 -> 驼峰自动映射
+      map-underscore-to-camel-case: true
+      # 开发环境打印 SQL，便于排查（生产关闭）
+      log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+      # 禁止在 XML/注解中使用 ${} 拼接 SQL（此处为框架层默认行为说明）
+      # 如遇 null 参数，统一使用 #{}
+      jdbc-type-for-null: 'null'
+    global-config:
+      # 控制台不打印 MP 的 banner
+      banner: false
+      db-config:
+        # 主键策略：雪花算法（便于后续分库分表，禁止数据库自增）
+        id-type: assign_id
+        # 逻辑删除字段与值（业务数据禁止物理删除）
+        logic-delete-field: deleted
+        logic-delete-value: 1
+        logic-not-delete-value: 0
+        # 更新策略：只更新非空字段，避免误覆盖
+        update-strategy: not_null
+
+## ---------------------------- 人机验证（开发环境覆盖） ----------------------------
+## 说明：主 application.yml 的默认值是"生产安全值"（email + 不回传验证码），
+## 这里按开发环境覆盖为"便于自测"的组合。上线切到 prod profile 后自动回到安全值，
+## 不需要人工记得修改任何开关。
+admin:
+  verify:
+    # 日志通道：无需邮件服务即可跑通完整验证流程
+    channel: log
+    # 开发环境回传验证码并由前端自动填入，避免"码发出去但谁也看不到"导致流程走不下去
+    reveal-code: true
+
+## ---------------------------- 日志 ----------------------------
+logging:
+  level:
+    root: info
+    com.example.admin: debug
+    # 屏蔽 Flyway/Hikari 的 INFO 噪音
+    org.flywaydb: warn
+    com.zaxxer.hikari: warn
+
+## ---------------------------- 接口文档（Knife4j） ----------------------------
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true
+knife4j:
+  enable: true
+  # 生产环境应关闭文档：knife4j.production=true
+  production: false
+  setting:
+    language: zh_cn
+    # 开启文档页暗色模式（Knife4j 4.x 原生支持）
+    enable-dark-mode: true
+    enable-footer: false

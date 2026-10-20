@@ -1,0 +1,261 @@
+/**
+ * Element Plus 细节兜底样式（选择器层）。
+ *
+ * <p>定位：只写"SCSS 变量表达不了"的少量规则，例如伪元素高亮条、渐变背景、内边距节奏。
+ * 能用变量解决的一律交给 src/styles/element/index.scss，避免出现两套真相。
+ *
+ * <p>两条硬约束：
+ * <ol>
+ *     <li>不使用 !important——改用"多一层类名"提升特异性来稳定胜出，
+ *         保持 Element Plus 自身的层级体系不被破坏；</li>
+ *     <li>不写死色值——全部引用 --admin-* 令牌，明暗主题自动适配。</li>
+ * </ol>
+ */
+
+/* ============================================================
+ * 一、全局交互节奏：所有可交互元素统一 0.2s ease
+ *
+ * 用"元素 + 类名"提升特异性（而非 !important），
+ * 稳定胜过 Element Plus 自带的 transition 简写。
+ * ========================================================== */
+button.el-button,
+li.el-menu-item,
+div.el-sub-menu__title,
+ul.el-pager > li,
+tr.el-table__row,
+td.el-table__cell,
+th.el-table__cell,
+div.el-input__wrapper {
+  transition-property: background-color, border-color, color, box-shadow;
+  transition-duration: var(--admin-transition-fast);
+  transition-timing-function: ease;
+}
+
+/* ============================================================
+ * 二、侧边栏菜单：干掉默认黑色 hover，改为主色渐变 + 选中高亮条
+ * ========================================================== */
+.el-menu {
+  border-right: none;
+  background-color: var(--admin-sidebar-bg);
+}
+
+.el-menu .el-menu-item,
+.el-menu .el-sub-menu__title {
+  height: var(--admin-menu-item-height);
+  line-height: var(--admin-menu-item-height);
+  margin: 2px 8px;
+  border-radius: var(--admin-radius-base);
+  position: relative;
+
+  &:hover {
+    /* 亮色：主色浅透明渐变；暗色：低饱和半透明（令牌内自动切换） */
+    background-color: var(--admin-menu-hover-bg);
+    background-image: var(--admin-menu-hover-gradient);
+    color: var(--admin-menu-hover-text);
+  }
+}
+
+.el-menu .el-sub-menu .el-menu-item {
+  height: var(--admin-menu-sub-item-height);
+  line-height: var(--admin-menu-sub-item-height);
+}
+
+/* 选中态：主色高亮条（::before）+ 文字高亮，与 hover 形成明确层级差 */
+.el-menu .el-menu-item::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 3px;
+  height: 18px;
+  border-radius: 0 3px 3px 0;
+  background-color: var(--admin-color-primary);
+  transform: translateY(-50%) scaleY(0);
+  transform-origin: center;
+  transition: transform var(--admin-transition-fast) ease;
+}
+
+.el-menu .el-menu-item.is-active {
+  background-color: var(--admin-menu-active-bg);
+  color: var(--admin-menu-active-text);
+  font-weight: 500;
+
+  &::before {
+    transform: translateY(-50%) scaleY(1);
+  }
+}
+
+/* 折叠态：去掉左右留白，保证图标居中 */
+.el-menu.el-menu--collapse .el-menu-item,
+.el-menu.el-menu--collapse .el-sub-menu__title {
+  margin: 2px 4px;
+}
+
+/* ============================================================
+ * 三、搜索表单：间距 16px / 标签 8px / 底部 16px
+ * ========================================================== */
+.el-form.el-form--inline .el-form-item {
+  margin-right: var(--admin-form-item-gap);
+  margin-bottom: var(--admin-form-item-gap);
+}
+
+.el-form .el-form-item {
+  margin-bottom: var(--admin-form-item-gap);
+}
+
+.el-form .el-form-item__label {
+  padding-right: var(--admin-form-label-gap);
+  color: var(--admin-text-regular);
+}
+
+/* ============================================================
+ * 四、表格：卡片化，表头加粗，去掉多余竖线
+ * ========================================================== */
+.el-table {
+  font-size: 14px;
+}
+
+.el-table .el-table__header-wrapper th.el-table__cell {
+  font-weight: 600;
+  color: var(--admin-table-header-text);
+  background-color: var(--admin-table-header-bg);
+}
+
+/* 只保留横向分隔线，去掉竖向与外框，形成清爽卡片感 */
+.el-table .el-table__cell {
+  border-right: none;
+}
+
+.el-table.el-table--border::before,
+.el-table.el-table--group::after,
+.el-table.el-table--border::after {
+  background-color: var(--admin-table-border-color);
+}
+
+.el-table .el-table__row:hover > td.el-table__cell {
+  background-color: var(--admin-table-row-hover-bg);
+}
+
+/* 选中行：亮色浅主色 / 暗色低饱和半透明，由令牌区分 */
+.el-table .el-table__row.current-row > td.el-table__cell {
+  background-color: var(--admin-table-current-row-bg);
+  color: var(--admin-text-primary);
+}
+
+/* 卡片：统一阴影与圆角 */
+.el-card {
+  border-radius: var(--admin-radius-base);
+  box-shadow: var(--admin-shadow-card);
+}
+
+.el-card .el-card__header {
+  padding: 14px 16px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--admin-border-color);
+}
+
+/* ============================================================
+ * 五、分页：与表格底部无缝衔接
+ * ========================================================== */
+.el-pagination {
+  font-weight: 400;
+}
+
+.el-pagination .el-pager li {
+  min-width: var(--el-pagination-button-width);
+  border-radius: var(--admin-radius-base);
+}
+
+.el-pagination .btn-prev,
+.el-pagination .btn-next {
+  border-radius: var(--admin-radius-base);
+}
+
+/* ============================================================
+ * 六、弹窗：标题栏 / 底栏 / 遮罩 全站一致
+ * ========================================================== */
+.el-dialog {
+  overflow: hidden;
+}
+
+.el-dialog .el-dialog__header {
+  padding: 16px 20px;
+  margin: 0;
+  border-bottom: 1px solid var(--admin-dialog-border-color);
+  background-color: var(--admin-dialog-header-bg);
+}
+
+.el-dialog .el-dialog__title {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
+  color: var(--admin-text-primary);
+}
+
+.el-dialog .el-dialog__headerbtn {
+  top: 12px;
+  right: 12px;
+}
+
+.el-dialog .el-dialog__body {
+  padding: 20px;
+  color: var(--admin-text-regular);
+}
+
+.el-dialog .el-dialog__footer {
+  padding: 12px 20px;
+  border-top: 1px solid var(--admin-dialog-border-color);
+  text-align: right;
+}
+
+/* 提示类弹窗（MessageBox）同样跟随主题 */
+.el-message-box {
+  border-radius: var(--admin-dialog-radius);
+  background-color: var(--admin-dialog-bg);
+  border-color: var(--admin-dialog-border-color);
+}
+
+.el-overlay {
+  background-color: var(--admin-overlay-color);
+}
+
+/* ============================================================
+ * 七、控件描边：按钮 / 输入框轮廓用"比分隔线稍深"的一档
+ *
+ * 暗色下若沿用 --el-border-color，按钮轮廓几乎不可见；
+ * 用 --admin-border-strong（亮 #dcdfe6 / 暗 #2f3b52）保证可辨识又不刺眼。
+ * ========================================================== */
+.el-button.el-button--default:not(.is-plain):not(.is-text):not(.is-link) {
+  border-color: var(--admin-border-strong);
+}
+
+.el-input__wrapper,
+.el-select__wrapper,
+.el-textarea__inner {
+  box-shadow: 0 0 0 1px var(--admin-border-strong) inset;
+}
+
+/* 面包屑：当前页用主色收尾，层级更清晰 */
+.el-breadcrumb .el-breadcrumb__inner {
+  color: var(--admin-text-regular);
+}
+
+.el-breadcrumb .el-breadcrumb__inner.is-link,
+.el-breadcrumb .el-breadcrumb__item:last-child .el-breadcrumb__inner {
+  color: var(--admin-text-primary);
+  font-weight: 500;
+}
+
+/* ============================================================
+ * 八、表格列拖拽视觉反馈（与 useColumnDrag 配合使用）
+ * ========================================================== */
+.el-table th.el-table__cell.is-column-drag-ghost {
+  opacity: 0.4;
+  background-color: var(--admin-table-row-hover-bg);
+}
+
+.el-table th.el-table__cell.is-column-drag-chosen {
+  background-color: var(--admin-menu-active-bg);
+  color: var(--admin-menu-active-text);
+  box-shadow: var(--admin-shadow-card);
+}

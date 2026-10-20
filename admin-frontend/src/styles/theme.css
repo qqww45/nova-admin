@@ -1,0 +1,254 @@
+/**
+ * 设计令牌（Design Token）：全站配色与尺寸的唯一来源。
+ *
+ * <p>设计原则：
+ * <ul>
+ *     <li>所有颜色以 CSS 变量形式定义，组件样式只引用变量，不写死色值；</li>
+ *     <li>明暗两套主题通过 <html class="dark"> 切换，变量值随之改变，无需重复编写组件样式；</li>
+ *     <li>同时覆盖 Element Plus 的 --el-* 变量，使第三方组件与自研组件在同一套主题下保持一致。</li>
+ * </ul>
+ *
+ * <p>配色体系（参考 label.s.ci64.com 的暗色风格）：
+ * <ul>
+ *     <li>亮色：中性灰白底 + blue-600 (#2563eb) 主色；</li>
+ *     <li>暗色：slate 深蓝黑底（#0b1220 / #0f172a / #111827），
+ *         而非 Element Plus 默认的纯灰黑 (#1f1f1f)——深蓝黑更柔和、层次更丰富；
+ *     <li>暗色下的"浅主色"用 #60a5fa 做文字/图标，避免深底上的高对比刺眼。</li>
+ * </ul>
+ *
+ * <p>命名约定：
+ * <ul>
+ *     <li>--admin-*：自研令牌，业务样式一律引用它；</li>
+ *     <li>--el-*：Element Plus 运行时变量，全部指向 --admin-*，
+ *         保证"改一个品牌色 → 全站联动"（详见 src/styles/element/index.scss）。</li>
+ * </ul>
+ */
+
+:root {
+  /* 品牌色：blue-600，与 slate 灰阶成套 */
+  --admin-color-primary: #2563eb;
+  --admin-color-primary-light: #3b82f6;
+
+  /* 布局背景 */
+  --admin-bg-color: #f5f7fa;
+  --admin-bg-page: #ffffff;
+  --admin-header-bg: #ffffff;
+  --admin-sidebar-bg: #ffffff;
+  --admin-sidebar-text: #303133;
+  --admin-sidebar-active: #ecf5ff;
+
+  /* 文本与边框 */
+  --admin-text-primary: #303133;
+  --admin-text-regular: #606266;
+  --admin-border-color: #e4e7ed;
+  /* 控件（按钮/输入框）描边：比分隔线稍深，保证控件轮廓可辨 */
+  --admin-border-strong: #dcdfe6;
+  --admin-shadow: 0 1px 4px rgba(0, 21, 41, 0.08);
+
+  /* 布局尺寸 */
+  --admin-sidebar-width: 220px;
+  --admin-sidebar-collapsed-width: 64px;
+  --admin-header-height: 56px;
+  --admin-tagsview-height: 36px;
+
+  /* 过渡时长（统一节奏，避免各组件动画速度不一致） */
+  --admin-transition-duration: 0.3s;
+  /* 交互元素（按钮 / 菜单 / 表格行）统一 0.2s ease */
+  --admin-transition-fast: 0.2s;
+
+  /* ---- 全局几何规范 ---- */
+  --admin-radius-base: 6px;
+  --admin-radius-small: 4px;
+  --admin-shadow-card: 0 2px 12px rgba(0, 0, 0, 0.08);
+
+  /* ---- 侧边栏菜单 ---- */
+  --admin-menu-item-height: 44px;
+  --admin-menu-sub-item-height: 40px;
+  --admin-menu-hover-bg: rgba(37, 99, 235, 0.08);
+  /* 主色浅透明渐变：左浓右淡，替代 Element Plus 默认的纯色块 */
+  --admin-menu-hover-gradient: linear-gradient(90deg, rgba(37, 99, 235, 0.14), rgba(37, 99, 235, 0.03));
+  --admin-menu-hover-text: var(--admin-color-primary);
+  --admin-menu-active-bg: rgba(37, 99, 235, 0.1);
+  --admin-menu-active-text: var(--admin-color-primary);
+
+  /* ---- 表格 ---- */
+  --admin-table-header-bg: #fafbfc;
+  --admin-table-header-text: #303133;
+  --admin-table-text-color: #606266;
+  --admin-table-border-color: #ebeef5;
+  --admin-table-row-hover-bg: #f5f7fa;
+  --admin-table-current-row-bg: rgba(37, 99, 235, 0.08);
+  --admin-table-row-padding: 10px;
+  --admin-table-cell-padding: 12px;
+
+  /* ---- 分页 ---- */
+  --admin-pagination-button-bg: #ffffff;
+  --admin-pagination-item-gap: 8px;
+
+  /* ---- 弹窗 ---- */
+  --admin-dialog-bg: #ffffff;
+  --admin-dialog-header-bg: #ffffff;
+  --admin-dialog-border-color: #e4e7ed;
+  --admin-dialog-radius: 8px;
+  --admin-overlay-color: rgba(15, 23, 42, 0.5);
+
+  /* ---- 搜索表单 ---- */
+  --admin-form-item-gap: 16px;
+  --admin-form-label-gap: 8px;
+
+  /* ---- 标签页（多页签导航） ---- */
+  --admin-tagsview-bg: var(--admin-bg-page);
+  /* 未选中页签：低对比灰胶囊，hover 微亮 */
+  --admin-tag-bg: rgba(15, 23, 42, 0.04);
+  --admin-tag-bg-hover: rgba(15, 23, 42, 0.08);
+  /* 选中页签：主色浅透明 + 主色文字 */
+  --admin-tag-active-bg: rgba(37, 99, 235, 0.1);
+  --admin-tag-active-border: rgba(37, 99, 235, 0.32);
+  --admin-tag-active-text: var(--admin-color-primary);
+
+  /* 同步给 Element Plus，保证第三方组件跟随自研主题 */
+  --el-color-primary: var(--admin-color-primary);
+  --el-bg-color: var(--admin-bg-page);
+  --el-bg-color-page: var(--admin-bg-color);
+  --el-bg-color-overlay: var(--admin-dialog-bg);
+  --el-text-color-primary: var(--admin-text-primary);
+  --el-text-color-regular: var(--admin-text-regular);
+  --el-border-color: var(--admin-border-color);
+  --el-border-color-light: var(--admin-border-color);
+  --el-border-color-lighter: var(--admin-border-color);
+  --el-fill-color-blank: var(--admin-bg-page);
+  --el-mask-color: var(--admin-overlay-color);
+  --el-box-shadow-light: 0 2px 12px rgba(0, 0, 0, 0.08);
+  --el-transition-duration: var(--admin-transition-fast);
+}
+
+html.dark {
+  /* 暗色下浅主色：用于文字 / 图标 / 描边，避免深底上的高对比刺眼 */
+  --admin-color-primary: #2563eb;
+  --admin-color-primary-light: #60a5fa;
+
+  /* slate 深蓝黑体系：页面 #0f172a，面板 #111827，顶栏/侧栏最深 #0b1220 */
+  --admin-bg-color: #0f172a;
+  --admin-bg-page: #111827;
+  --admin-header-bg: #0b1220;
+  --admin-sidebar-bg: #0b1220;
+  --admin-sidebar-text: #94a3b8;
+  --admin-sidebar-active: rgba(96, 165, 250, 0.16);
+
+  --admin-text-primary: #f1f5f9;
+  --admin-text-regular: #94a3b8;
+  --admin-border-color: #1e293b;
+  --admin-border-strong: #2f3b52;
+  --admin-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+
+  /* 暗色下卡片阴影：降低透明度，避免"浮起来"的割裂感 */
+  --admin-shadow-card: 0 2px 12px rgba(0, 0, 0, 0.35);
+
+  /* 暗色菜单：主色低饱和半透明，避免高对比刺眼 */
+  --admin-menu-hover-bg: rgba(96, 165, 250, 0.1);
+  --admin-menu-hover-gradient: linear-gradient(90deg, rgba(96, 165, 250, 0.16), rgba(96, 165, 250, 0.02));
+  --admin-menu-hover-text: var(--admin-color-primary-light);
+  --admin-menu-active-bg: rgba(96, 165, 250, 0.14);
+  --admin-menu-active-text: var(--admin-color-primary-light);
+
+  /* 暗色表格：主色低饱和半透明，文字对比度满足 WCAG 2.1 AA */
+  --admin-table-header-bg: #0b1220;
+  --admin-table-header-text: #e2e8f0;
+  --admin-table-text-color: #94a3b8;
+  --admin-table-border-color: #1e293b;
+  --admin-table-row-hover-bg: rgba(96, 165, 250, 0.07);
+  --admin-table-current-row-bg: rgba(96, 165, 250, 0.14);
+
+  /* 暗色弹窗 */
+  --admin-dialog-bg: #111827;
+  --admin-dialog-header-bg: #0b1220;
+  --admin-dialog-border-color: #1e293b;
+  --admin-overlay-color: rgba(2, 6, 23, 0.7);
+
+  --admin-pagination-button-bg: #1e293b;
+
+  /* 暗色页签：低对比胶囊 */
+  --admin-tagsview-bg: var(--admin-header-bg);
+  --admin-tag-bg: rgba(148, 163, 184, 0.1);
+  --admin-tag-bg-hover: rgba(148, 163, 184, 0.18);
+  --admin-tag-active-bg: rgba(96, 165, 250, 0.14);
+  --admin-tag-active-border: rgba(96, 165, 250, 0.35);
+  --admin-tag-active-text: var(--admin-color-primary-light);
+
+  /* 暗色下 Element Plus 变量同步 */
+  --el-bg-color: var(--admin-bg-page);
+  --el-bg-color-page: var(--admin-bg-color);
+  --el-bg-color-overlay: var(--admin-dialog-bg);
+  --el-text-color-primary: var(--admin-text-primary);
+  --el-text-color-regular: var(--admin-text-regular);
+  --el-border-color: var(--admin-border-color);
+  --el-border-color-light: var(--admin-border-color);
+  --el-border-color-lighter: var(--admin-border-color);
+  --el-fill-color-blank: var(--admin-bg-page);
+  --el-fill-color: #1e293b;
+  --el-fill-color-light: #1e293b;
+  --el-fill-color-lighter: #172033;
+  --el-mask-color: var(--admin-overlay-color);
+  --el-box-shadow-light: 0 2px 12px rgba(0, 0, 0, 0.35);
+
+  /*
+   * 主色梯度（关键）：Element Plus 的 tag / alert / plain 按钮 /
+   * 分页 active 等都从 light-3 ~ light-9 取色，暗色下若不覆盖，
+   * 会沿用"与白色混合"的浅色值 → 出现大片发白发亮的高对比色块。
+   * 这里按"暗色下向深蓝偏移"的规则重算，与 slate 底色同族。
+   */
+  --el-color-primary-light-3: #1e40af;
+  --el-color-primary-light-5: #1e3a8a;
+  --el-color-primary-light-7: #1a3275;
+  --el-color-primary-light-8: #182d66;
+  --el-color-primary-light-9: #16284f;
+  --el-color-primary-dark-2: #60a5fa;
+
+  /* 语义色梯度：与 Element Plus 官方 dark 主题一致的对比度基准 */
+  --el-color-success: #67c23a;
+  --el-color-success-light-3: #50872f;
+  --el-color-success-light-5: #3e6123;
+  --el-color-success-light-7: #2d3617;
+  --el-color-success-light-8: #27250f;
+  --el-color-success-light-9: #1f2510;
+  --el-color-success-dark-2: #85cf60;
+  --el-color-warning: #e6a23c;
+  --el-color-warning-light-3: #a77728;
+  --el-color-warning-light-5: #7d5a20;
+  --el-color-warning-light-7: #543d19;
+  --el-color-warning-light-8: #402b12;
+  --el-color-warning-light-9: #2c1f10;
+  --el-color-warning-dark-2: #eebe77;
+  --el-color-danger: #f56c6c;
+  --el-color-danger-light-3: #b25252;
+  --el-color-danger-light-5: #863e3e;
+  --el-color-danger-light-7: #5b2a2a;
+  --el-color-danger-light-8: #472020;
+  --el-color-danger-light-9: #331919;
+  --el-color-danger-dark-2: #f78989;
+  --el-color-error: #f56c6c;
+  --el-color-error-light-3: #b25252;
+  --el-color-error-light-5: #863e3e;
+  --el-color-error-light-7: #5b2a2a;
+  --el-color-error-light-8: #472020;
+  --el-color-error-light-9: #331919;
+  --el-color-error-dark-2: #f78989;
+  --el-color-info: #909399;
+  --el-color-info-light-3: #6b6d71;
+  --el-color-info-light-5: #525457;
+  --el-color-info-light-7: #393a3c;
+  --el-color-info-light-8: #2c2d2e;
+  --el-color-info-light-9: #232426;
+  --el-color-info-dark-2: #a6a9ad;
+}
+
+/* 主题切换时不产生突兀跳变：对颜色相关属性统一加过渡 */
+html,
+body,
+.layout-sidebar,
+.layout-header {
+  transition:
+    background-color var(--admin-transition-duration) ease,
+    color var(--admin-transition-duration) ease,
+    border-color var(--admin-transition-duration) ease;
+}

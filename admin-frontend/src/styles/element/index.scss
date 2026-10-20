@@ -1,0 +1,177 @@
+/**
+ * Element Plus 主题覆盖入口（SCSS 变量层）。
+ *
+ * <p>作用：通过 Element Plus 官方的 <code>@forward '.../common/var.scss' with (...)</code>
+ * 机制，在编译期改写组件默认变量，而不是在运行期用高优先级选择器去"打架"。
+ * 这是官方推荐的自定义主题方式，具备三个好处：
+ * <ol>
+ *     <li>改的是变量而非成品 CSS，不会破坏 Element Plus 自身的样式优先级体系；</li>
+ *     <li>所有取值都指向 <code>--admin-*</code> 设计令牌（见 styles/theme.css），
+ *         因此明暗主题切换、品牌色替换都是"改一处、全站生效"；</li>
+ *     <li>后续升级 Element Plus 只需核对变量名，无需重写选择器。</li>
+ * </ol>
+ *
+ * <p>注意：本文件只声明变量，不产出任何 CSS，
+ * 由 vite.config.ts 的 <code>css.preprocessorOptions.scss.additionalData</code> 注入到每个 SCSS 文件。
+ */
+
+@use 'sass:map';
+
+/* ============================================================
+ * 1. 全局基础：圆角 / 尺寸 / 阴影 / 字号
+ * ========================================================== */
+@forward 'element-plus/theme-chalk/src/common/var.scss' with (
+  /* 圆角：全站统一 6px（按钮 / 输入框 / 卡片 / 标签 / 下拉） */
+  $border-radius: (
+    'base': var(--admin-radius-base),
+    'small': var(--admin-radius-small),
+    'round': 20px,
+    'circle': 100%,
+  ),
+  /* 控件高度：保持 Element Plus 默认，只统一节奏 */
+  $common-component-size: (
+    'large': 40px,
+    'default': 32px,
+    'small': 24px,
+  ),
+  $font-size: (
+    'extra-large': 20px,
+    'large': 18px,
+    'medium': 16px,
+    'base': 14px,
+    'small': 13px,
+    'extra-small': 12px,
+  ),
+  /* 卡片阴影：统一 0 2px 12px rgba(0,0,0,.08)（暗色由令牌自动降饱和） */
+  $box-shadow: (
+    '': (
+      0px 12px 32px 4px rgba(0, 0, 0, 0.04),
+      0px 8px 20px rgba(0, 0, 0, 0.08),
+    ),
+    'light': var(--admin-shadow-card),
+    'lighter': 0px 0px 6px rgba(0, 0, 0, 0.12),
+    'dark': (
+      0px 16px 48px 16px rgba(0, 0, 0, 0.08),
+      0px 12px 32px rgba(0, 0, 0, 0.12),
+      0px 8px 16px -8px rgba(0, 0, 0, 0.16),
+    ),
+  ),
+
+  /* ============================================================
+   * 2. 侧边栏菜单：干掉默认的黑色 hover，改为品牌主色渐变
+   * ========================================================== */
+  $menu: (
+    'active-color': var(--admin-menu-active-text),
+    'text-color': var(--admin-sidebar-text),
+    'hover-text-color': var(--admin-menu-hover-text),
+    'bg-color': var(--admin-sidebar-bg),
+    'hover-bg-color': var(--admin-menu-hover-bg),
+    'item-height': var(--admin-menu-item-height),
+    'sub-item-height': var(--admin-menu-sub-item-height),
+    'horizontal-height': 60px,
+    'horizontal-sub-item-height': 36px,
+    'item-font-size': 14px,
+    'item-hover-fill': var(--admin-menu-hover-bg),
+    'border-color': var(--admin-border-color),
+    'base-level-padding': 12px,
+    'level-padding': 16px,
+    'icon-width': 20px,
+  ),
+
+  /* ============================================================
+   * 3. 表格：卡片化，统一行高 / 内边距 / 表头 / 行态
+   * ========================================================== */
+  $table: (
+    'border-color': var(--admin-table-border-color),
+    'border': 1px solid var(--admin-table-border-color),
+    'text-color': var(--admin-table-text-color),
+    'header-text-color': var(--admin-table-header-text),
+    'row-hover-bg-color': var(--admin-table-row-hover-bg),
+    /* 选中行：亮色浅主色、暗色低饱和半透明（令牌内区分） */
+    'current-row-bg-color': var(--admin-table-current-row-bg),
+    'header-bg-color': var(--admin-table-header-bg),
+    'fixed-box-shadow': var(--admin-shadow-card),
+    'bg-color': var(--admin-bg-page),
+    'tr-bg-color': var(--admin-bg-page),
+    'expanded-cell-bg-color': var(--admin-bg-page),
+    'fixed-left-column': inset 10px 0 10px -10px rgb(0 0 0 / 15%),
+    'fixed-right-column': inset -10px 0 10px -10px rgb(0 0 0 / 15%),
+  ),
+  /* 行高：默认 10px 上下内边距 → 行高约 48px，视觉更舒展 */
+  $table-padding: (
+    'large': 14px 0,
+    'default': var(--admin-table-row-padding) 0,
+    'small': 6px 0,
+  ),
+  /* 单元格左右内边距统一 12px */
+  $table-cell-padding: (
+    'large': 0 16px,
+    'default': 0 var(--admin-table-cell-padding),
+    'small': 0 8px,
+  ),
+
+  /* ============================================================
+   * 4. 分页：与表格底部无缝衔接
+   * ========================================================== */
+  $pagination: (
+    'font-size': 14px,
+    'bg-color': var(--admin-pagination-button-bg),
+    'text-color': var(--admin-text-regular),
+    'border-radius': var(--admin-radius-base),
+    'button-color': var(--admin-text-regular),
+    'button-width': 32px,
+    'button-height': 32px,
+    'button-disabled-color': var(--admin-text-regular),
+    'button-disabled-bg-color': var(--admin-pagination-button-bg),
+    'button-bg-color': var(--admin-pagination-button-bg),
+    'hover-color': var(--admin-color-primary),
+    'font-size-small': 12px,
+    'button-width-small': 24px,
+    'button-height-small': 24px,
+    'button-width-large': 40px,
+    'button-height-large': 40px,
+    'item-gap': var(--admin-pagination-item-gap),
+  ),
+
+  /* ============================================================
+   * 5. 弹窗：标题栏 / 圆角 / 背景全站一致
+   * ========================================================== */
+  $dialog: (
+    'width': 50%,
+    'margin-top': 12vh,
+    'bg-color': var(--admin-dialog-bg),
+    'box-shadow': var(--admin-shadow-card),
+    'title-font-size': 16px,
+    'content-font-size': 14px,
+    'font-line-height': 24px,
+    'padding-primary': 20px,
+    'border-radius': var(--admin-dialog-radius),
+  ),
+
+  /* ============================================================
+   * 6. 卡片：统一圆角与阴影
+   * ========================================================== */
+  $card: (
+    'border-color': var(--admin-border-color),
+    'border-radius': var(--admin-radius-base),
+    'padding': 16px,
+    'bg-color': var(--admin-bg-page),
+  ),
+
+  /* ============================================================
+   * 7. 表单：紧凑化所需的基线
+   * ========================================================== */
+  $form: (
+    'label-font-size': 14px,
+    'inline-content-width': 220px,
+  ),
+
+  /* ============================================================
+   * 8. 遮罩层：暗色下加深，亮色下保持克制
+   * ========================================================== */
+  $overlay-color: (
+    '': var(--admin-overlay-color),
+    'light': var(--admin-overlay-color),
+    'lighter': var(--admin-overlay-color),
+  )
+);

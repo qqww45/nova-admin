@@ -1,0 +1,102 @@
+## =============================================================================
+## 上线过渡环境（staging）：先跑起来的最小可用组合
+##
+## 适用场景：还没有 MySQL / Redis / 邮件服务，但需要一套公网可访问的部署用于验收。
+##   - 数据库：SQLite（文件落在 /app/data，容器卷持久化）
+##   - 会话态：内存（单实例，重启即失效）
+##   - 验证码通道：log（ADMIN_VERIFY_CHANNEL=log），并回传验证码便于自测
+##
+## ⚠️ 这是过渡配置，不是最终生产配置：
+##   1. SQLite 单写者、内存态不跨实例，水平扩容前必须切 MySQL + Redis；
+##   2. 验证码走日志通道 + 回传，等于第二因子可被读到，只能用于内部验收；
+##   3. 正式上线请改用 prod profile（MySQL + Redis + email），
+##      届时 VerifyConfigGuard / DefaultCredentialGuard 会重新生效并强制校验。
+##
+## 与 dev 的差异：不打印 SQL、不暴露接口文档、日志级别对齐生产，
+## 避免"本地能跑、线上行为不同"。
+## =============================================================================
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  datasource:
+    driver-class-name: org.sqlite.JDBC
+    # 数据文件放在容器卷 /app/data（compose 已挂载），容器重建不丢数据
+    url: jdbc:sqlite:${SQLITE_PATH:/app/data/admin.db}?busy_timeout=5000&journal_mode=WAL
+    username:
+    password:
+    hikari:
+      # SQLite 不支持 JDBC4 isValid()，必须显式指定探活语句
+      connection-test-query: SELECT 1
+      maximum-pool-size: 5
+      minimum-idle: 1
+      connection-timeout: 30000
+      auto-commit: true
+
+  ## 迁移：沿用同一套 Flyway 脚本，SQLite 首次启动自动建表 + 初始化数据
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    # SQLite 与 MySQL 的 DDL 分支由脚本自身处理，过渡期不做过严校验
+    validate-on-migrate: false
+    encoding: UTF-8
+    clean-disabled: true
+
+  mybatis-plus:
+    configuration:
+      map-underscore-to-camel-case: true
+      # 与生产一致：不打印 SQL
+      log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
+      jdbc-type-for-null: 'null'
+    global-config:
+      banner: false
+      db-config:
+        id-type: assign_id
+        logic-delete-field: deleted
+        logic-delete-value: 1
+        logic-not-delete-value: 0
+        update-strategy: not_null
+
+admin:
+  # 单实例部署：票据 / 刷新令牌 / 在线会话 / 可信设备 / 风控计数都在进程内存
+  cache:
+    type: ${ADMIN_CACHE_TYPE:memory}
+  verify:
+    # 过渡期走日志通道（无需邮件服务即可跑通完整验证流程）
+    channel: ${ADMIN_VERIFY_CHANNEL:log}
+    # 回传验证码给前端，验收人员才能在无邮件服务时完成强验证
+    # ⚠️ 正式环境必须为 false（prod profile 已内置守卫）
+    reveal-code: ${ADMIN_VERIFY_REVEAL_CODE:true}
+    one-time-code-ttl-seconds: ${ADMIN_VERIFY_CODE_TTL:300}
+  cors:
+    # 精确列出前端来源，禁止 *
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:https://admin.s.ci64.com}
+
+## ---------------------------- 日志 ----------------------------
+logging:
+  file:
+    name: ${LOG_FILE:/app/logs/admin-backend.log}
+  level:
+    root: warn
+    com.example.admin: info
+    org.flywaydb: warn
+    com.zaxxer.hikari: warn
+
+## ---------------------------- 健康检查 ----------------------------
+## 过渡环境没有邮件服务：关闭 mail 健康指示器，否则 /actuator/health 恒为 DOWN，
+## 部署流水线会误判"服务没起来"。
+management:
+  health:
+    mail:
+      enabled: false
+
+## ---------------------------- 接口文档（过渡期同样关闭） ----------------------------
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+knife4j:
+  enable: false
+  production: true
