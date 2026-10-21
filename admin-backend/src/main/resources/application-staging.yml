@@ -19,6 +19,18 @@ server:
   port: ${SERVER_PORT:8080}
 
 spring:
+  ## staging 不使用 Redis：关掉 Spring Boot 的 Redis 自动装配。
+  ## 原因：spring-boot-starter-data-redis 只要在 classpath 上，就会创建
+  ## LettuceConnectionFactory 并注册 redis 健康指示器；而 staging 是内存缓存，
+  ## 没有 Redis，于是它不停重试 localhost:6379 刷错误日志，
+  ## 并把 /actuator/health 拉成 DOWN（部署流水线据此判定服务未就绪）。
+  ## 本 profile 下所有 Redis*Store 都带 @ConditionalOnProperty(admin.cache.type=redis)，
+  ## 不加载；CacheConfigGuard 也限定 @Profile("prod")，所以排除自动装配不会影响任何 Bean。
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.redis.RedisReactiveAutoConfiguration
+
   datasource:
     driver-class-name: org.sqlite.JDBC
     # 数据文件放在容器卷 /app/data（compose 已挂载），容器重建不丢数据
@@ -84,11 +96,13 @@ logging:
     com.zaxxer.hikari: warn
 
 ## ---------------------------- 健康检查 ----------------------------
-## 过渡环境没有邮件服务：关闭 mail 健康指示器，否则 /actuator/health 恒为 DOWN，
-## 部署流水线会误判"服务没起来"。
+## 过渡环境既没有邮件服务也没有 Redis：这两个指示器只要开着，
+## /actuator/health 就会恒为 DOWN，部署流水线会误判"服务没起来"。
 management:
   health:
     mail:
+      enabled: false
+    redis:
       enabled: false
 
 ## ---------------------------- 接口文档（过渡期同样关闭） ----------------------------
