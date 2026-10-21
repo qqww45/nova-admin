@@ -45,7 +45,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     # 防止在 scp / docker 拉取阶段无限挂起（之前挂过 1 小时）
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -101,13 +101,22 @@ jobs:
           SSH_OPTS="-p $PORT -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4"
           SCP_OPTS="-P $PORT -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4"
 
+          echo "=========== 部署开始 ==========="
+          echo "目标：$SSH_USER@$SSH_HOST:$PORT"
+          ls -lh dist/admin-backend.jar
+
           # 解析真实部署目录：未配置 DEPLOY_PATH 时用该 SSH 账号的 home（避免写 /opt 没权限）
-          REMOTE_HOME="$(ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" 'echo $HOME' 2>/dev/null)"
+          echo "[1/4] 连接服务器、解析 home 目录..."
+          REMOTE_HOME="$(timeout 60 ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" 'echo $HOME' 2>/dev/null || true)"
           REMOTE_HOME="${REMOTE_HOME:-/home/$SSH_USER}"
           DIR="${DEPLOY_PATH:-$REMOTE_HOME/nova-admin}"
-          echo "部署目录：$DIR"
+          echo "      部署目录：$DIR"
 
-          ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" "mkdir -p '$DIR/data' '$DIR/logs'"
+          echo "[2/4] 创建目录..."
+          if ! timeout 60 ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" "mkdir -p '$DIR/data' '$DIR/logs'"; then
+            echo "      创建目录失败或超时（60s）" >&2
+            exit 1
+          fi
 
           # .env.deploy 只在服务器没有 .env 时才需要上传
           FILES="dist/admin-backend.jar deploy/Dockerfile deploy/docker-compose.yml"
@@ -115,13 +124,31 @@ jobs:
             FILES="$FILES .env.deploy"
           fi
 
-          # shellcheck disable=SC2086
-          scp $SCP_OPTS $FILES "$SSH_USER@$SSH_HOST:$DIR/"
+          echo "[3/4] 上传文件（服务器在中国时国际链路可能较慢，超时 30 分钟）..."
+          if timeout 45 ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" "command -v rsync >/dev/null 2>&1"; then
+            echo "      服务器有 rsync：断点续传 + 实时进度"
+            # shellcheck disable=SC2086
+            if ! timeout 1800 rsync -e "ssh $SSH_OPTS" --partial --inplace --progress $FILES "$SSH_USER@$SSH_HOST:$DIR/"; then
+              echo "      上传失败或超时（1800s）：请检查服务器磁盘空间与公网带宽" >&2
+              exit 1
+            fi
+          else
+            echo "      服务器无 rsync，改用 scp"
+            # shellcheck disable=SC2086
+            if ! timeout 1800 scp $SCP_OPTS -o Compression=no $FILES "$SSH_USER@$SSH_HOST:$DIR/"; then
+              echo "      上传失败或超时（1800s）：请检查服务器磁盘空间与公网带宽" >&2
+              exit 1
+            fi
+          fi
+          echo "      上传完成"
 
-          ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" "bash -s -- '$DIR'" <<'REMOTE'
+          echo "[4/4] 远程构建并启动容器（超时 20 分钟）..."
+          timeout 1100 ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" "bash -s -- '$DIR'" <<'REMOTE' || { echo "      远程执行失败或超时" >&2; exit 1; }
           set -euo pipefail
           DIR="$1"
+          echo "[remote] 已连接服务器，工作目录 $DIR"
           cd "$DIR"
+          ls -lh
 
           # 服务器上没有 .env 时才采用 CI 生成的那份；已存在则保持服务器配置
           if [ ! -f .env ]; then
@@ -140,8 +167,8 @@ jobs:
 
           # docker 访问：优先直接访问；ubuntu 这类云镜像账号通常有免密 sudo，作为兜底
           DOCKER="docker"
-          if ! docker info >/dev/null 2>&1; then
-            if sudo -n docker info >/dev/null 2>&1; then
+          if ! timeout 30 docker info >/dev/null 2>&1; then
+            if timeout 30 sudo -n docker info >/dev/null 2>&1; then
               DOCKER="sudo -n docker"
             else
               echo "该 SSH 账号无法访问 Docker 守护进程。请任选其一：" >&2
