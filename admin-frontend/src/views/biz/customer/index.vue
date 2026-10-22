@@ -90,16 +90,22 @@ function openCreate(): void {
 
 async function openEdit(row: CustomerResp): Promise<void> {
   editingId.value = row.id;
-  const detail = await customerApi.detail(row.id);
-  form.value = {
-    id: detail.id,
-    customerName: detail.customerName,
-    customerCode: detail.customerCode,
-    address: detail.address,
-    remark: detail.remark,
-    status: detail.status ?? 1,
-  };
+  // 先弹窗，避免网速慢时长时间无响应；拉取详情时在框内显示加载态
   formVisible.value = true;
+  formLoading.value = true;
+  try {
+    const detail = await customerApi.detail(row.id);
+    form.value = {
+      id: detail.id,
+      customerName: detail.customerName,
+      customerCode: detail.customerCode,
+      address: detail.address,
+      remark: detail.remark,
+      status: detail.status ?? 1,
+    };
+  } finally {
+    formLoading.value = false;
+  }
 }
 
 async function submitForm(): Promise<void> {
@@ -152,13 +158,20 @@ async function removeBatch(): Promise<void> {
 /* ---------------- 详情抽屉 ---------------- */
 
 const detailVisible = ref(false);
+const detailLoading = ref(false);
 const detailTab = ref('contact');
 const detail = shallowRef<CustomerDetailResp | null>(null);
 
 async function openDetail(row: CustomerResp): Promise<void> {
-  detail.value = await customerApi.detail(row.id);
-  detailTab.value = 'contact';
+  // 先开抽屉，再异步拉取详情，框内显示加载态
   detailVisible.value = true;
+  detailLoading.value = true;
+  try {
+    detail.value = await customerApi.detail(row.id);
+    detailTab.value = 'contact';
+  } finally {
+    detailLoading.value = false;
+  }
 }
 
 /** 详情标题：客户名称 */
@@ -292,7 +305,7 @@ async function beforeUpload(file: File): Promise<boolean> {
 
     <!-- 新增 / 编辑 -->
     <el-dialog v-model="formVisible" :title="editingId ? '编辑客户' : '新增客户'" width="560px">
-      <el-form :model="form" label-width="100px">
+      <el-form v-loading="formLoading" element-loading-text="加载中…" :model="form" label-width="100px">
         <el-form-item label="客户名称" required>
           <el-input v-model="form.customerName" placeholder="必填，重复名称无法保存" />
         </el-form-item>
@@ -320,6 +333,7 @@ async function beforeUpload(file: File): Promise<boolean> {
 
     <!-- 详情抽屉：联系人 / 开票信息 / 关联订单 -->
     <el-drawer v-model="detailVisible" :title="detailTitle" size="60%">
+      <div v-loading="detailLoading" element-loading-text="加载中…" style="min-height: 200px">
       <el-tabs v-model="detailTab">
         <el-tab-pane label="联系人" name="contact">
           <el-table :data="detail?.contacts ?? []" size="small" border>
@@ -363,6 +377,7 @@ async function beforeUpload(file: File): Promise<boolean> {
           </el-table>
         </el-tab-pane>
       </el-tabs>
+      </div>
     </el-drawer>
   </div>
 </template>

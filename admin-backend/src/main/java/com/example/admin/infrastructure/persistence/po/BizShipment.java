@@ -86,6 +86,10 @@ public class BizShipment extends BaseEntity {
     @Schema(description = "来源：MANUAL手工 IMPORT导入 PASTE粘贴")
     private String source;
 
+    /** 出货方向：SHIP / RETURN / RETURN_FACTORY */
+    @Schema(description = "出货方向：SHIP出货 RETURN销售退货 RETURN_FACTORY退厂返工")
+    private String shipmentType;
+
     /** 导入批次 ID */
     @Schema(description = "导入批次ID")
     private Long importBatchId;

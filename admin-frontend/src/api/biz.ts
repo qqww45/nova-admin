@@ -23,6 +23,16 @@ import type {
   ShipmentQuery,
   ShipmentResp,
   ShipmentSaveReq,
+  ReceiptResp,
+  ReceiptQuery,
+  ReceiptSaveReq,
+  CustomerOpeningResp,
+  CustomerOpeningSaveReq,
+  StatementResp,
+  StatementQuery,
+  StatementPreviewReq,
+  StatementPreviewResp,
+  StatementGenerateReq,
 } from '@/types/biz';
 import type { PageResult } from '@/types/api';
 
@@ -312,5 +322,88 @@ export const dictApi = {
 
   byCode(dictCode: string): Promise<DictResp[]> {
     return http.get<DictResp[]>(`/biz/dict/${dictCode}`);
+  },
+};
+
+/* ---------------- 收款登记 / 期初应收 ---------------- */
+
+export const receiptApi = {
+  /** 分页查询收款记录 */
+  page(params: ReceiptQuery): Promise<PageResult<ReceiptResp>> {
+    return http.get<PageResult<ReceiptResp>>('/biz/receipt/list', params);
+  },
+
+  /** 收款详情 */
+  detail(id: string): Promise<ReceiptResp> {
+    return http.get<ReceiptResp>(`/biz/receipt/${id}`);
+  },
+
+  /** 新增/更新收款登记 */
+  save(data: ReceiptSaveReq): Promise<string> {
+    return http.post<string>('/biz/receipt', data);
+  },
+
+  /** 作废收款 */
+  voidReceipt(id: string, reason: string): Promise<void> {
+    return http.put<void>(`/biz/receipt/${id}/void`, { reason });
+  },
+
+  /** 查询客户期初应收 */
+  opening(customerId: string): Promise<CustomerOpeningResp> {
+    return http.get<CustomerOpeningResp>('/biz/receipt/opening', { customerId });
+  },
+
+  /** 保存客户期初应收 */
+  saveOpening(data: CustomerOpeningSaveReq): Promise<void> {
+    return http.put<void>('/biz/receipt/opening', data);
+  },
+};
+
+/* ---------------- 对账单 ---------------- */
+
+export const statementApi = {
+  /** 分页查询对账单 */
+  page(params: StatementQuery): Promise<PageResult<StatementResp>> {
+    return http.get<PageResult<StatementResp>>('/biz/statement/list', params);
+  },
+
+  /** 对账单详情（含明细） */
+  detail(id: string): Promise<StatementResp> {
+    return http.get<StatementResp>(`/biz/statement/${id}`);
+  },
+
+  /** 实时预览（不落库） */
+  preview(data: StatementPreviewReq): Promise<StatementPreviewResp> {
+    return http.post<StatementPreviewResp>('/biz/statement/preview', data);
+  },
+
+  /** 生成并保存对账单快照 */
+  generate(data: StatementGenerateReq): Promise<string> {
+    return http.post<string>('/biz/statement', data);
+  },
+
+  /** 签发 */
+  issue(id: string): Promise<void> {
+    return http.put<void>(`/biz/statement/${id}/issue`);
+  },
+
+  /** 客户确认 */
+  confirm(id: string, reason: string): Promise<void> {
+    return http.put<void>(`/biz/statement/${id}/confirm`, { reason });
+  },
+
+  /** 标记差异 */
+  markDifferent(id: string, reason: string): Promise<void> {
+    return http.put<void>(`/biz/statement/${id}/different`, { reason });
+  },
+
+  /** 导出 Excel（传统台账格式） */
+  async export(id: string): Promise<void> {
+    const response = await http.get<Blob>(
+      '/biz/statement/export',
+      { id },
+      { responseType: 'blob' } as never,
+    );
+    downloadBlob(response, `对账单-${id}.xlsx`);
   },
 };

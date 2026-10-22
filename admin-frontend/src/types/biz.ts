@@ -449,3 +449,146 @@ export interface OperationLogResp {
   operatorName?: string;
   operateTime?: string;
 }
+
+/* ==================== 收款登记 / 期初应收 ==================== */
+
+/** 收款记录 */
+export interface ReceiptResp {
+  id: string;
+  receiptNo?: string;
+  customerId?: string;
+  customerName?: string;
+  receiptDate?: string;
+  amount?: number;
+  currency?: string;
+  settleMethod?: string;
+  settleMethodLabel?: string;
+  invoiceNo?: string;
+  allocatedAmount?: number;
+  status?: string;
+  statusLabel?: string;
+  remark?: string;
+  createTime?: string;
+}
+
+/** 收款查询条件 */
+export interface ReceiptQuery {
+  pageNum?: number;
+  pageSize?: number;
+  keyword?: string;
+  customerId?: string;
+  beginDate?: string;
+  endDate?: string;
+  status?: string;
+}
+
+/** 收款保存请求 */
+export interface ReceiptSaveReq {
+  id?: string;
+  customerId?: string;
+  receiptDate?: string;
+  amount?: number;
+  currency?: string;
+  settleMethod?: string;
+  invoiceNo?: string;
+  remark?: string;
+}
+
+/** 客户期初应收 */
+export interface CustomerOpeningResp {
+  id?: string;
+  customerId?: string;
+  customerName?: string;
+  asOfDate?: string;
+  openingBalance?: number;
+  currency?: string;
+  remark?: string;
+}
+
+/** 客户期初应收保存请求 */
+export interface CustomerOpeningSaveReq {
+  customerId?: string;
+  asOfDate?: string;
+  openingBalance?: number;
+  currency?: string;
+  remark?: string;
+}
+
+/* ==================== 对账单 ==================== */
+
+/** 对账单明细行 */
+export interface StatementLineResp {
+  id?: string;
+  lineType?: string;
+  lineTypeLabel?: string;
+  bizDate?: string;
+  docNo?: string;
+  customerOrderNo?: string;
+  materialNo?: string;
+  materialName?: string;
+  spec?: string;
+  unit?: string;
+  qty?: number;
+  unitPrice?: number;
+  amount?: number;
+  remark?: string;
+  sourceId?: string;
+  sortNo?: number;
+}
+
+/** 对账单 */
+export interface StatementResp {
+  id: string;
+  stmtNo?: string;
+  customerId?: string;
+  customerName?: string;
+  startDate?: string;
+  endDate?: string;
+  openingBalance?: number;
+  shippedAmount?: number;
+  returnedAmount?: number;
+  receivedAmount?: number;
+  endingBalance?: number;
+  status?: string;
+  statusLabel?: string;
+  confirmDate?: string;
+  remark?: string;
+  lines?: StatementLineResp[];
+  createTime?: string;
+}
+
+/** 对账单查询条件 */
+export interface StatementQuery {
+  pageNum?: number;
+  pageSize?: number;
+  keyword?: string;
+  customerId?: string;
+  status?: string;
+  beginDate?: string;
+  endDate?: string;
+}
+
+/** 对账单预览请求 */
+export interface StatementPreviewReq {
+  customerId?: string;
+  startDate?: string;
+  endDate?: string;
+}
+
+/** 对账单预览响应 */
+export interface StatementPreviewResp {
+  lines: StatementLineResp[];
+  openingBalance?: number;
+  shippedAmount?: number;
+  returnedAmount?: number;
+  receivedAmount?: number;
+  endingBalance?: number;
+}
+
+/** 对账单生成请求 */
+export interface StatementGenerateReq {
+  customerId?: string;
+  startDate?: string;
+  endDate?: string;
+  remark?: string;
+}

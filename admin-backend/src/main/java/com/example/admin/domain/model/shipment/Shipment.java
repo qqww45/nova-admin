@@ -1,6 +1,7 @@
 package com.example.admin.domain.model.shipment;
 
 import com.example.admin.common.exception.BusinessException;
+import com.example.admin.domain.model.shipment.ShipmentType;
 import com.example.admin.domain.service.AmountCalculator;
 import lombok.Data;
 
@@ -81,6 +82,9 @@ public class Shipment {
 
     /** 来源 */
     private ShipmentSource source;
+
+    /** 出货方向：SHIP / RETURN / RETURN_FACTORY（V13 新增） */
+    private ShipmentType shipmentType;
 
     /** 导入批次 ID */
     private Long importBatchId;

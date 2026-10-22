@@ -8,14 +8,26 @@ import com.example.admin.domain.model.imports.ImportBatch;
 import com.example.admin.domain.model.imports.ImportType;
 import com.example.admin.domain.model.log.OperationLog;
 import com.example.admin.domain.model.mapping.ImportMapping;
+import com.example.admin.domain.model.receipt.Receipt;
+import com.example.admin.domain.model.receipt.ReceiptStatus;
+import com.example.admin.domain.model.reconciliation.CustomerOpening;
+import com.example.admin.domain.model.reconciliation.Statement;
+import com.example.admin.domain.model.reconciliation.StatementLine;
+import com.example.admin.domain.model.reconciliation.StatementLineType;
+import com.example.admin.domain.model.reconciliation.StatementStatus;
 import com.example.admin.domain.model.shipment.Shipment;
 import com.example.admin.domain.model.shipment.ShipmentSource;
 import com.example.admin.domain.model.shipment.ShipmentStatus;
+import com.example.admin.domain.model.shipment.ShipmentType;
+import com.example.admin.infrastructure.persistence.po.BizCustomerOpening;
 import com.example.admin.infrastructure.persistence.po.BizDictItem;
 import com.example.admin.infrastructure.persistence.po.BizImportBatch;
 import com.example.admin.infrastructure.persistence.po.BizImportMapping;
 import com.example.admin.infrastructure.persistence.po.BizOperationLog;
+import com.example.admin.infrastructure.persistence.po.BizReceipt;
 import com.example.admin.infrastructure.persistence.po.BizShipment;
+import com.example.admin.infrastructure.persistence.po.BizStatement;
+import com.example.admin.infrastructure.persistence.po.BizStatementLine;
 import org.springframework.stereotype.Component;
 
 /**
@@ -43,6 +55,7 @@ public class BizSupportConverter {
         BeanUtil.copyProperties(po, shipment);
         shipment.setStatus(ShipmentStatus.ofCode(po.getStatus()));
         shipment.setSource(ShipmentSource.ofCode(po.getSource()));
+        shipment.setShipmentType(ShipmentType.ofCode(po.getShipmentType()));
         return shipment;
     }
 
@@ -60,6 +73,7 @@ public class BizSupportConverter {
         BeanUtil.copyProperties(domain, po);
         po.setStatus(domain.getStatus() == null ? ShipmentStatus.NORMAL.getCode() : domain.getStatus().getCode());
         po.setSource(domain.getSource() == null ? ShipmentSource.MANUAL.getCode() : domain.getSource().getCode());
+        po.setShipmentType(domain.getShipmentType() == null ? ShipmentType.SHIP.getCode() : domain.getShipmentType().getCode());
         return po;
     }
 
@@ -157,6 +171,92 @@ public class BizSupportConverter {
         }
         BizOperationLog po = new BizOperationLog();
         BeanUtil.copyProperties(domain, po);
+        return po;
+    }
+
+    /* ---------------- 收款登记 ---------------- */
+
+    public Receipt receiptToDomain(BizReceipt po) {
+        if (po == null) {
+            return null;
+        }
+        Receipt receipt = new Receipt();
+        BeanUtil.copyProperties(po, receipt);
+        receipt.setStatus(ReceiptStatus.ofCode(po.getStatus()));
+        return receipt;
+    }
+
+    public BizReceipt receiptToPo(Receipt domain) {
+        if (domain == null) {
+            return null;
+        }
+        BizReceipt po = new BizReceipt();
+        BeanUtil.copyProperties(domain, po);
+        po.setStatus(domain.getStatus() == null ? ReceiptStatus.NORMAL.getCode() : domain.getStatus().getCode());
+        return po;
+    }
+
+    /* ---------------- 客户期初应收 ---------------- */
+
+    public CustomerOpening openingToDomain(BizCustomerOpening po) {
+        if (po == null) {
+            return null;
+        }
+        CustomerOpening opening = new CustomerOpening();
+        BeanUtil.copyProperties(po, opening);
+        return opening;
+    }
+
+    public BizCustomerOpening openingToPo(CustomerOpening domain) {
+        if (domain == null) {
+            return null;
+        }
+        BizCustomerOpening po = new BizCustomerOpening();
+        BeanUtil.copyProperties(domain, po);
+        return po;
+    }
+
+    /* ---------------- 对账单头 ---------------- */
+
+    public Statement statementToDomain(BizStatement po) {
+        if (po == null) {
+            return null;
+        }
+        Statement statement = new Statement();
+        BeanUtil.copyProperties(po, statement);
+        statement.setStatus(StatementStatus.ofCode(po.getStatus()));
+        return statement;
+    }
+
+    public BizStatement statementToPo(Statement domain) {
+        if (domain == null) {
+            return null;
+        }
+        BizStatement po = new BizStatement();
+        BeanUtil.copyProperties(domain, po);
+        po.setStatus(domain.getStatus() == null ? StatementStatus.DRAFT.getCode() : domain.getStatus().getCode());
+        return po;
+    }
+
+    /* ---------------- 对账单明细 ---------------- */
+
+    public StatementLine statementLineToDomain(BizStatementLine po) {
+        if (po == null) {
+            return null;
+        }
+        StatementLine line = new StatementLine();
+        BeanUtil.copyProperties(po, line);
+        line.setLineType(StatementLineType.ofCode(po.getLineType()));
+        return line;
+    }
+
+    public BizStatementLine statementLineToPo(StatementLine domain) {
+        if (domain == null) {
+            return null;
+        }
+        BizStatementLine po = new BizStatementLine();
+        BeanUtil.copyProperties(domain, po);
+        po.setLineType(domain.getLineType() == null ? StatementLineType.SHIP.getCode() : domain.getLineType().getCode());
         return po;
     }
 }

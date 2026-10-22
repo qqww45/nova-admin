@@ -99,4 +99,14 @@ public interface ShipmentRepository {
      * @return 出货记录列表
      */
     List<Shipment> listByIds(List<Long> ids);
+
+    /**
+     * 查询某客户在指定期间内的出货流水分录（对账单聚合用，已按日期升序，自动排除已作废）。
+     *
+     * @param customerId 客户 ID
+     * @param start      期间起（含）
+     * @param end        期间止（含）
+     * @return 出货记录列表
+     */
+    List<Shipment> listByCustomerAndPeriod(Long customerId, LocalDateTime start, LocalDateTime end);
 }

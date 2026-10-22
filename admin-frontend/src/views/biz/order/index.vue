@@ -187,49 +187,61 @@ function onItemsChange(): void {
 async function openCreate(): Promise<void> {
   editingId.value = null;
   form.value = blankOrder();
-  form.value.orderNo = await orderApi.generateOrderNo();
   items.value = [blankItem(), blankItem(), blankItem()];
+  // 先弹窗，订单号异步生成后再回填，避免网速慢时迟迟不弹窗
   formVisible.value = true;
+  formLoading.value = true;
+  try {
+    form.value.orderNo = await orderApi.generateOrderNo();
+  } finally {
+    formLoading.value = false;
+  }
 }
 
 async function openEdit(row: OrderResp): Promise<void> {
   editingId.value = row.id;
-  const detail: OrderDetailResp = await orderApi.detail(row.id);
-  form.value = {
-    id: detail.id,
-    orderNo: detail.orderNo,
-    customerId: detail.customerId,
-    customerOrderNo: detail.customerOrderNo ?? '',
-    requirement: detail.requirement ?? '',
-    mainboardLabel: detail.mainboardLabel ?? '',
-    cartonLabel: detail.cartonLabel ?? '',
-    salesmanId: detail.salesmanId,
-    orderDate: detail.orderDate ?? '',
-    expectedDeliveryDate: detail.expectedDeliveryDate ?? '',
-    currency: detail.currency ?? 'CNY',
-    settlementMethod: detail.settlementMethod ?? '',
-    deliveryMethod: detail.deliveryMethod ?? '',
-    remark: detail.remark ?? '',
-    items: [],
-  };
-  items.value =
-    detail.items.length > 0
-      ? detail.items.map((item) => ({
-          id: item.id,
-          lineNo: item.lineNo,
-          model: item.model,
-          materialNo: item.materialNo ?? '',
-          customerMaterialNo: item.customerMaterialNo ?? '',
-          spec: item.spec ?? '',
-          qtyOrdered: item.qtyOrdered,
-          taxRate: item.taxRate,
-          unitPrice: item.unitPrice,
-          reconcileDate: item.reconcileDate ?? '',
-          remark: item.remark ?? '',
-        }))
-      : [blankItem()];
-  items.value.forEach(recalcRow);
+  // 先弹窗，拉取详情时在框内显示加载态
   formVisible.value = true;
+  formLoading.value = true;
+  try {
+    const detail: OrderDetailResp = await orderApi.detail(row.id);
+    form.value = {
+      id: detail.id,
+      orderNo: detail.orderNo,
+      customerId: detail.customerId,
+      customerOrderNo: detail.customerOrderNo ?? '',
+      requirement: detail.requirement ?? '',
+      mainboardLabel: detail.mainboardLabel ?? '',
+      cartonLabel: detail.cartonLabel ?? '',
+      salesmanId: detail.salesmanId,
+      orderDate: detail.orderDate ?? '',
+      expectedDeliveryDate: detail.expectedDeliveryDate ?? '',
+      currency: detail.currency ?? 'CNY',
+      settlementMethod: detail.settlementMethod ?? '',
+      deliveryMethod: detail.deliveryMethod ?? '',
+      remark: detail.remark ?? '',
+      items: [],
+    };
+    items.value =
+      detail.items.length > 0
+        ? detail.items.map((item) => ({
+            id: item.id,
+            lineNo: item.lineNo,
+            model: item.model,
+            materialNo: item.materialNo ?? '',
+            customerMaterialNo: item.customerMaterialNo ?? '',
+            spec: item.spec ?? '',
+            qtyOrdered: item.qtyOrdered,
+            taxRate: item.taxRate,
+            unitPrice: item.unitPrice,
+            reconcileDate: item.reconcileDate ?? '',
+            remark: item.remark ?? '',
+          }))
+        : [blankItem()];
+    items.value.forEach(recalcRow);
+  } finally {
+    formLoading.value = false;
+  }
 }
 
 async function submitOrder(): Promise<void> {
@@ -466,7 +478,7 @@ async function downloadTemplate(): Promise<void> {
       top="4vh"
       @open="preloadCustomers"
     >
-      <el-form :model="form" label-width="100px" class="order-form">
+      <el-form v-loading="formLoading" element-loading-text="加载中…" :model="form" label-width="100px" class="order-form">
         <el-row :gutter="16">
           <el-col :span="6">
             <el-form-item label="订单号">

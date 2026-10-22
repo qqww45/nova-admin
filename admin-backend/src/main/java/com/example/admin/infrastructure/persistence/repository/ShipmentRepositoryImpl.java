@@ -130,6 +130,20 @@ public class ShipmentRepositoryImpl implements ShipmentRepository {
                 .stream().map(converter::shipmentToDomain).toList();
     }
 
+    @Override
+    public List<Shipment> listByCustomerAndPeriod(Long customerId, LocalDateTime start, LocalDateTime end) {
+        if (customerId == null) {
+            return List.of();
+        }
+        LambdaQueryWrapper<BizShipment> wrapper = new LambdaQueryWrapper<BizShipment>()
+                .eq(BizShipment::getCustomerId, customerId)
+                .ge(start != null, BizShipment::getShipDate, start)
+                .le(end != null, BizShipment::getShipDate, end)
+                .ne(BizShipment::getStatus, ShipmentStatus.VOID.getCode())
+                .orderByAsc(BizShipment::getShipDate);
+        return shipmentMapper.selectList(wrapper).stream().map(converter::shipmentToDomain).toList();
+    }
+
     /**
      * 按查询条件构造通用查询条件（异常池与列表共用）。
      *
