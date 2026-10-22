@@ -44,6 +44,8 @@ const columns = [
 
 /** 可信设备弹窗 */
 const deviceDialog = ref(false);
+/** 弹窗内加载态：设备列表拉取期间置 true */
+const deviceLoading = ref(false);
 const devices = ref<DeviceTrustResp[]>([]);
 const currentUser = ref<OnlineSessionResp | null>(null);
 
@@ -117,8 +119,17 @@ async function kick(row: OnlineSessionResp, all: boolean): Promise<void> {
 /** 打开可信设备弹窗 */
 async function openDevices(row: OnlineSessionResp): Promise<void> {
   currentUser.value = row;
-  devices.value = await onlineApi.devices(row.userId);
+  // 先弹窗再拉数据，避免网速慢时长时间无响应；框内表格显示加载态，失败则关窗（错误已由 http 拦截器统一提示）
+  devices.value = [];
   deviceDialog.value = true;
+  deviceLoading.value = true;
+  try {
+    devices.value = await onlineApi.devices(row.userId);
+  } catch {
+    deviceDialog.value = false;
+  } finally {
+    deviceLoading.value = false;
+  }
 }
 
 /**
@@ -138,7 +149,12 @@ async function removeTrust(device: DeviceTrustResp): Promise<void> {
   }
   await onlineApi.removeTrust(user.userId, device.deviceId);
   ElMessage.success('已移除该设备');
-  devices.value = await onlineApi.devices(user.userId);
+  deviceLoading.value = true;
+  try {
+    devices.value = await onlineApi.devices(user.userId);
+  } finally {
+    deviceLoading.value = false;
+  }
   await load();
 }
 
@@ -208,7 +224,7 @@ onMounted(load);
     </ProTable>
 
     <el-dialog v-model="deviceDialog" :title="`可信设备 - ${currentUser?.username ?? ''}`" width="680px">
-      <el-table :data="devices" border size="small">
+      <el-table v-loading="deviceLoading" element-loading-text="加载中…" :data="devices" border size="small">
         <el-table-column label="设备标识" min-width="200">
           <template #default="{ row }">
             <el-tooltip :content="asDevice(row).deviceId" placement="top">

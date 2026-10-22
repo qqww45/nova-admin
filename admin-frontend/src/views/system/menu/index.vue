@@ -31,6 +31,8 @@ const columns = [
 /** 表单弹窗 */
 const dialogVisible = ref(false);
 const dialogTitle = ref('');
+/** 弹窗内加载态：详情拉取期间置 true，避免网速慢时用户对空表单误操作 */
+const formLoading = ref(false);
 const formRef = ref<FormInstance>();
 const form = reactive<Partial<MenuVo>>({
   id: undefined,
@@ -120,28 +122,45 @@ function openCreate(parentId?: string): void {
 /**
  * 打开编辑弹窗。
  *
+ * <p>先弹窗再拉详情，避免网速慢时长时间无响应；拉取期间框内显示加载态。
  * <p>两次防御：
  * <ol>
  *     <li>detail 请求失败（如无 system:menu:query 权限）时 http 层已 toast，
- *         这里 catch 住避免 unhandled rejection，且不打开空弹窗；</li>
- *     <li>后端返回空数组时 detail 为 undefined，直接打开弹窗会呈现"全空表单"，
- *         与"编辑"语义不符 —— 提示后中止。</li>
+ *         这里 catch 住避免 unhandled rejection，并关掉弹窗，不呈现空表单；</li>
+ *     <li>后端返回空数组时 detail 为 undefined，空表单与"编辑"语义不符 —— 提示后关窗。</li>
  * </ol>
  */
 async function openEdit(row: MenuVo): Promise<void> {
-  let detail: MenuVo | undefined;
-  try {
-    detail = await menuApi.detail(row.id);
-  } catch {
-    return; // 错误提示已由 http 拦截器统一弹出
-  }
-  if (!detail) {
-    ElMessage.error('菜单详情加载失败，请刷新后重试');
-    return;
-  }
   dialogTitle.value = '编辑菜单';
-  Object.assign(form, detail);
+  // 先置空再弹窗：详情未到时框内不残留上一条菜单的数据
+  Object.assign(form, {
+    id: undefined,
+    parentId: '0',
+    menuName: '',
+    menuType: MENU_TYPE.MENU,
+    path: '',
+    component: '',
+    permission: '',
+    icon: '',
+    sort: 0,
+    visible: 1,
+    status: 0,
+  });
   dialogVisible.value = true;
+  formLoading.value = true;
+  try {
+    const detail = await menuApi.detail(row.id);
+    if (!detail) {
+      ElMessage.error('菜单详情加载失败，请刷新后重试');
+      dialogVisible.value = false;
+      return;
+    }
+    Object.assign(form, detail);
+  } catch {
+    dialogVisible.value = false; // 错误提示已由 http 拦截器统一弹出
+  } finally {
+    formLoading.value = false;
+  }
 }
 
 async function submitForm(): Promise<void> {
@@ -231,7 +250,7 @@ onMounted(() => {
     </ProTable>
 
     <el-dialog v-model="dialogVisible" :title="dialogTitle" width="560px" destroy-on-close>
-      <el-form ref="formRef" :model="form" :rules="rules" label-width="90px">
+      <el-form ref="formRef" v-loading="formLoading" element-loading-text="加载中…" :model="form" :rules="rules" label-width="90px">
         <el-form-item label="上级菜单">
           <el-tree-select
             v-model="form.parentId"
@@ -284,7 +303,7 @@ onMounted(() => {
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="submitForm">确定</el-button>
+        <el-button type="primary" :loading="formLoading" :disabled="formLoading" @click="submitForm">确定</el-button>
       </template>
     </el-dialog>
   </div>

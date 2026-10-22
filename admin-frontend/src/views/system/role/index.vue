@@ -2,7 +2,7 @@
 /**
  * 角色管理：增删改查 + 启停 + 菜单权限分配（树形勾选）。
  */
-import { onMounted, reactive, ref } from 'vue';
+import { nextTick, onMounted, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus';
 import ProTable from '@/components/ProTable/index.vue';
 import TableActionBar, { type TableActionItem } from '@/components/TableActionBar/index.vue';
@@ -30,6 +30,8 @@ const { loading, list, total, pageNum, pageSize, query, reload, reset, onPageCha
 /** 角色表单弹窗 */
 const dialogVisible = ref(false);
 const dialogTitle = ref('');
+/** 弹窗内加载态：详情拉取期间置 true，避免网速慢时用户对空表单误操作 */
+const formLoading = ref(false);
 const formRef = ref<FormInstance>();
 const form = reactive<RoleSaveReq>({
   id: undefined,
@@ -50,6 +52,8 @@ const rules: FormRules = {
 
 /** 菜单权限分配抽屉 */
 const assignVisible = ref(false);
+/** 抽屉内加载态：未拿到已选菜单前禁用保存，防止空集合提交清空角色权限 */
+const assignLoading = ref(false);
 const menuTree = ref<MenuVo[]>([]);
 const currentRoleId = ref('');
 const treeRef = ref<InstanceType<typeof import('element-plus').ElTree>>();
@@ -63,9 +67,18 @@ function openCreate(): void {
 
 async function openEdit(row: RoleResp): Promise<void> {
   dialogTitle.value = '编辑角色';
-  const detail = await roleApi.detail(row.id);
-  Object.assign(form, detail);
+  // 先置空表单并弹窗，避免网速慢时长时间无响应；详情在框内加载，失败则关窗（错误已由 http 拦截器统一提示）
+  Object.assign(form, { id: undefined, roleName: '', roleKey: '', sort: 0, status: 0, remark: '' });
   dialogVisible.value = true;
+  formLoading.value = true;
+  try {
+    const detail = await roleApi.detail(row.id);
+    Object.assign(form, detail);
+  } catch {
+    dialogVisible.value = false;
+  } finally {
+    formLoading.value = false;
+  }
 }
 
 async function submitForm(): Promise<void> {
@@ -114,13 +127,30 @@ async function handleDelete(row: RoleResp): Promise<void> {
  * </ol>
  * detail 加载失败时直接放弃打开（错误已由 http 层提示），
  * 绝不在"未知当前权限"的状态下放行提交入口。
+ * <p>网速慢时先开抽屉再在框内异步加载，避免长时间无响应；
+ * 加载期间禁用保存按钮，加载失败则关抽屉，安全语义不变。
  */
 async function openAssign(row: RoleResp): Promise<void> {
   currentRoleId.value = row.id;
-  const [tree, detail] = await Promise.all([menuApi.tree(), roleApi.detail(row.id)]);
-  menuTree.value = tree ?? [];
-  checkedKeys.value = detail?.menuIds ?? [];
+  // 先清空勾选再开抽屉，避免残留上一个角色的已选菜单
+  checkedKeys.value = [];
   assignVisible.value = true;
+  assignLoading.value = true;
+  try {
+    const [tree, detail] = await Promise.all([
+      // 菜单树已随页面预加载过则不重复请求
+      menuTree.value.length > 0 ? Promise.resolve(menuTree.value) : menuApi.tree(),
+      roleApi.detail(row.id),
+    ]);
+    menuTree.value = tree ?? [];
+    checkedKeys.value = detail?.menuIds ?? [];
+    // default-checked-keys 只在树挂载时生效，而数据晚于抽屉打开到达，需手动回填勾选
+    void nextTick(() => treeRef.value?.setCheckedKeys(checkedKeys.value));
+  } catch {
+    assignVisible.value = false;
+  } finally {
+    assignLoading.value = false;
+  }
 }
 
 /** 把 el-table 的行数据类型化（操作列为页面自写列，框架给出的行类型是 DefaultRow） */
@@ -212,7 +242,7 @@ onMounted(() => {
 
     <!-- 角色表单 -->
     <el-dialog v-model="dialogVisible" :title="dialogTitle" width="480px" destroy-on-close>
-      <el-form ref="formRef" :model="form" :rules="rules" label-width="80px">
+      <el-form ref="formRef" v-loading="formLoading" element-loading-text="加载中…" :model="form" :rules="rules" label-width="80px">
         <el-form-item label="角色名称" prop="roleName">
           <el-input v-model="form.roleName" placeholder="如：系统管理员" />
         </el-form-item>
@@ -234,7 +264,7 @@ onMounted(() => {
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="submitForm">确定</el-button>
+        <el-button type="primary" :loading="formLoading" :disabled="formLoading" @click="submitForm">确定</el-button>
       </template>
     </el-dialog>
 
@@ -242,18 +272,20 @@ onMounted(() => {
          destroy-on-close：default-checked-keys 只在树挂载时生效，
          不销毁的话换一个角色再打开，勾选状态还是上一次的残留。 -->
     <el-drawer v-model="assignVisible" title="分配菜单权限" size="420px" destroy-on-close>
-      <el-tree
-        ref="treeRef"
-        :data="menuTree"
-        :props="{ label: 'menuName', children: 'children' }"
-        node-key="id"
-        show-checkbox
-        default-expand-all
-        :default-checked-keys="checkedKeys"
-      />
+      <div v-loading="assignLoading" element-loading-text="加载中…">
+        <el-tree
+          ref="treeRef"
+          :data="menuTree"
+          :props="{ label: 'menuName', children: 'children' }"
+          node-key="id"
+          show-checkbox
+          default-expand-all
+          :default-checked-keys="checkedKeys"
+        />
+      </div>
       <template #footer>
         <el-button @click="assignVisible = false">取消</el-button>
-        <el-button type="primary" @click="submitAssign">保存</el-button>
+        <el-button type="primary" :loading="assignLoading" :disabled="assignLoading" @click="submitAssign">保存</el-button>
       </template>
     </el-drawer>
   </div>

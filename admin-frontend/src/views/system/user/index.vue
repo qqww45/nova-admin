@@ -43,6 +43,8 @@ const deptTree = ref<DeptVo[]>([]);
 const dialogVisible = ref(false);
 const dialogTitle = ref('');
 const formRef = ref<FormInstance>();
+/** 弹窗内加载态：详情拉取期间置 true，避免网速慢时用户对空表单误操作 */
+const formLoading = ref(false);
 const selectedIds = ref<string[]>([]);
 
 const form = reactive<UserSaveReq>({
@@ -88,21 +90,42 @@ function openCreate(): void {
 /** 打开编辑弹窗 */
 async function openEdit(row: UserResp): Promise<void> {
   dialogTitle.value = '编辑用户';
-  const detail = await userApi.detail(row.id);
+  // 先置空表单并弹窗，避免网速慢时长时间无响应；详情在框内加载，失败则关窗（错误已由 http 拦截器统一提示）
   Object.assign(form, {
-    id: detail.id,
-    username: detail.username,
-    nickname: detail.nickname,
+    id: undefined,
+    username: '',
+    nickname: '',
     password: '',
-    email: detail.email,
-    phone: detail.phone,
-    sex: detail.sex,
-    status: detail.status,
-    deptId: detail.deptId,
-    roleIds: detail.roleIds ?? [],
-    remark: detail.remark,
+    email: '',
+    phone: '',
+    sex: 0,
+    status: 0,
+    deptId: undefined,
+    roleIds: [],
+    remark: '',
   });
   dialogVisible.value = true;
+  formLoading.value = true;
+  try {
+    const detail = await userApi.detail(row.id);
+    Object.assign(form, {
+      id: detail.id,
+      username: detail.username,
+      nickname: detail.nickname,
+      password: '',
+      email: detail.email,
+      phone: detail.phone,
+      sex: detail.sex,
+      status: detail.status,
+      deptId: detail.deptId,
+      roleIds: detail.roleIds ?? [],
+      remark: detail.remark,
+    });
+  } catch {
+    dialogVisible.value = false;
+  } finally {
+    formLoading.value = false;
+  }
 }
 
 /** 提交表单 */
@@ -298,7 +321,7 @@ onMounted(async () => {
 
     <!-- 新增 / 编辑弹窗 -->
     <el-dialog v-model="dialogVisible" :title="dialogTitle" width="560px" destroy-on-close>
-      <el-form ref="formRef" :model="form" :rules="rules" label-width="80px">
+      <el-form ref="formRef" v-loading="formLoading" element-loading-text="加载中…" :model="form" :rules="rules" label-width="80px">
         <el-form-item label="用户名" prop="username">
           <el-input v-model="form.username" :disabled="Boolean(form.id)" placeholder="请输入用户名" />
         </el-form-item>
@@ -345,7 +368,7 @@ onMounted(async () => {
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="submitForm">确定</el-button>
+        <el-button type="primary" :loading="formLoading" :disabled="formLoading" @click="submitForm">确定</el-button>
       </template>
     </el-dialog>
 
