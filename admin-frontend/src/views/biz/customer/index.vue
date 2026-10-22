@@ -15,8 +15,13 @@ import type { ProTableColumn } from '@/components/ProTable/index.vue';
 import TableActionBar from '@/components/TableActionBar/index.vue';
 import { customerApi, importExportApi } from '@/api/biz';
 import { useTable } from '@/composables/useTable';
+import { useDict } from '@/composables/useDict';
 import type {
+  CustomerContactReq,
+  CustomerContactResp,
   CustomerDetailResp,
+  CustomerInvoiceReq,
+  CustomerInvoiceResp,
   CustomerQuery,
   CustomerResp,
   CustomerSaveReq,
@@ -25,6 +30,11 @@ import type { PageResult } from '@/types/api';
 import { useUserStore } from '@/store/user';
 
 const userStore = useUserStore();
+
+const { options: dictOptions } = useDict();
+
+/** 发票类型下拉（禁止硬编码，来自字典） */
+const invoiceTypeOptions = dictOptions('invoice_type');
 
 /* ---------------- 列表 ---------------- */
 
@@ -176,6 +186,160 @@ async function openDetail(row: CustomerResp): Promise<void> {
 
 /** 详情标题：客户名称 */
 const detailTitle = computed(() => detail.value?.customerName ?? '客户详情');
+
+/* ---------------- 联系人 / 开票信息维护 ---------------- */
+
+/**
+ * 子表操作后刷新详情与列表。
+ *
+ * <p>默认联系人/开票信息会反映到列表的「默认联系人」列，所以两边都要刷。
+ */
+async function reloadDetail(): Promise<void> {
+  if (!detail.value) {
+    return;
+  }
+  detail.value = await customerApi.detail(detail.value.id);
+  reload();
+}
+
+/* ---- 联系人 ---- */
+
+const contactDialogVisible = ref(false);
+const contactFormLoading = ref(false);
+const contactEditingId = ref<string | null>(null);
+const contactForm = ref<CustomerContactReq>({ customerId: '', contactName: '', status: 1 });
+
+function openContactCreate(): void {
+  contactEditingId.value = null;
+  contactForm.value = { customerId: detail.value?.id ?? '', contactName: '', status: 1 };
+  contactDialogVisible.value = true;
+}
+
+function openContactEdit(row: CustomerContactResp): void {
+  contactEditingId.value = row.id;
+  contactForm.value = {
+    id: row.id,
+    customerId: row.customerId,
+    contactName: row.contactName,
+    title: row.title,
+    phone: row.phone,
+    mobile: row.mobile,
+    email: row.email,
+    isDefault: row.isDefault,
+    status: row.status ?? 1,
+    remark: row.remark,
+  };
+  contactDialogVisible.value = true;
+}
+
+async function submitContactForm(): Promise<void> {
+  if (!contactForm.value.contactName?.trim()) {
+    ElMessage.warning('请填写联系人姓名');
+    return;
+  }
+  // 与后端 CustomerAppServiceImpl 的校验保持一致：电话与手机至少一个
+  if (!contactForm.value.phone?.trim() && !contactForm.value.mobile?.trim()) {
+    ElMessage.warning('电话与手机至少填写一个');
+    return;
+  }
+  contactFormLoading.value = true;
+  try {
+    await customerApi.saveContact(contactForm.value);
+    ElMessage.success('保存成功');
+    contactDialogVisible.value = false;
+    await reloadDetail();
+  } finally {
+    contactFormLoading.value = false;
+  }
+}
+
+async function removeContact(row: CustomerContactResp): Promise<void> {
+  await ElMessageBox.confirm(`确认删除联系人【${row.contactName}】？`, '删除确认', {
+    type: 'warning',
+  });
+  await customerApi.removeContact(row.id);
+  ElMessage.success('删除成功');
+  await reloadDetail();
+}
+
+async function setDefaultContact(row: CustomerContactResp): Promise<void> {
+  await customerApi.setDefaultContact(row.id);
+  ElMessage.success('已设为默认联系人');
+  await reloadDetail();
+}
+
+/* ---- 开票信息 ---- */
+
+const invoiceDialogVisible = ref(false);
+const invoiceFormLoading = ref(false);
+const invoiceEditingId = ref<string | null>(null);
+const invoiceForm = ref<CustomerInvoiceReq>({
+  customerId: '',
+  invoiceTitle: '',
+  invoiceType: 'SPECIAL',
+  status: 1,
+});
+
+function openInvoiceCreate(): void {
+  invoiceEditingId.value = null;
+  invoiceForm.value = {
+    customerId: detail.value?.id ?? '',
+    invoiceTitle: '',
+    invoiceType: 'SPECIAL',
+    status: 1,
+  };
+  invoiceDialogVisible.value = true;
+}
+
+function openInvoiceEdit(row: CustomerInvoiceResp): void {
+  invoiceEditingId.value = row.id;
+  invoiceForm.value = {
+    id: row.id,
+    customerId: row.customerId,
+    invoiceTitle: row.invoiceTitle,
+    taxNo: row.taxNo,
+    bankName: row.bankName,
+    bankAccount: row.bankAccount,
+    invoiceAddress: row.invoiceAddress,
+    invoicePhone: row.invoicePhone,
+    invoiceType: row.invoiceType,
+    isDefault: row.isDefault,
+    status: row.status ?? 1,
+    remark: row.remark,
+  };
+  invoiceDialogVisible.value = true;
+}
+
+async function submitInvoiceForm(): Promise<void> {
+  if (!invoiceForm.value.invoiceTitle?.trim()) {
+    ElMessage.warning('请填写开票名称');
+    return;
+  }
+  invoiceFormLoading.value = true;
+  try {
+    await customerApi.saveInvoice(invoiceForm.value);
+    ElMessage.success('保存成功');
+    invoiceDialogVisible.value = false;
+    await reloadDetail();
+  } finally {
+    invoiceFormLoading.value = false;
+  }
+}
+
+async function removeInvoice(row: CustomerInvoiceResp): Promise<void> {
+  await ElMessageBox.confirm(`确认删除开票信息【${row.invoiceTitle}】？`, '删除确认', {
+    type: 'warning',
+  });
+  await customerApi.removeInvoice(row.id);
+  ElMessage.success('删除成功');
+  await reloadDetail();
+}
+
+async function setDefaultInvoice(row: CustomerInvoiceResp): Promise<void> {
+  await customerApi.setDefaultInvoice(row.id);
+  ElMessage.success('已设为默认开票信息');
+  await reloadDetail();
+}
 
 /* ---------------- 导入导出 ---------------- */
 
@@ -336,6 +500,17 @@ async function beforeUpload(file: File): Promise<boolean> {
       <div v-loading="detailLoading" element-loading-text="加载中…" style="min-height: 200px">
       <el-tabs v-model="detailTab">
         <el-tab-pane label="联系人" name="contact">
+          <div class="detail-toolbar">
+            <el-button
+              v-if="userStore.hasPermission('biz:customer:edit')"
+              type="primary"
+              :icon="Plus"
+              size="small"
+              @click="openContactCreate"
+            >
+              新增联系人
+            </el-button>
+          </div>
           <el-table :data="detail?.contacts ?? []" size="small" border>
             <el-table-column prop="contactName" label="姓名" width="100" />
             <el-table-column prop="title" label="职务" width="100" />
@@ -347,10 +522,47 @@ async function beforeUpload(file: File): Promise<boolean> {
                 <el-tag v-if="row.isDefault === 1" type="success" size="small">默认</el-tag>
               </template>
             </el-table-column>
+            <el-table-column label="操作" width="170" align="center">
+              <template #default="{ row }">
+                <TableActionBar
+                  :actions="[
+                    {
+                      label: '设为默认',
+                      type: 'primary',
+                      hidden: !userStore.hasPermission('biz:customer:edit') || (row as CustomerContactResp).isDefault === 1,
+                      onClick: () => setDefaultContact(row as CustomerContactResp),
+                    },
+                    {
+                      label: '编辑',
+                      type: 'primary',
+                      hidden: !userStore.hasPermission('biz:customer:edit'),
+                      onClick: () => openContactEdit(row as CustomerContactResp),
+                    },
+                    {
+                      label: '删除',
+                      type: 'danger',
+                      hidden: !userStore.hasPermission('biz:customer:edit'),
+                      onClick: () => removeContact(row as CustomerContactResp),
+                    },
+                  ]"
+                />
+              </template>
+            </el-table-column>
           </el-table>
         </el-tab-pane>
 
         <el-tab-pane label="开票信息" name="invoice">
+          <div class="detail-toolbar">
+            <el-button
+              v-if="userStore.hasPermission('biz:customer:edit')"
+              type="primary"
+              :icon="Plus"
+              size="small"
+              @click="openInvoiceCreate"
+            >
+              新增开票信息
+            </el-button>
+          </div>
           <el-table :data="detail?.invoices ?? []" size="small" border>
             <el-table-column prop="invoiceTitle" label="开票名称" min-width="180" />
             <el-table-column prop="taxNo" label="纳税人识别号" width="160" />
@@ -360,6 +572,32 @@ async function beforeUpload(file: File): Promise<boolean> {
             <el-table-column label="默认" width="70" align="center">
               <template #default="{ row }">
                 <el-tag v-if="row.isDefault === 1" type="success" size="small">默认</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="170" align="center">
+              <template #default="{ row }">
+                <TableActionBar
+                  :actions="[
+                    {
+                      label: '设为默认',
+                      type: 'primary',
+                      hidden: !userStore.hasPermission('biz:customer:edit') || (row as CustomerInvoiceResp).isDefault === 1,
+                      onClick: () => setDefaultInvoice(row as CustomerInvoiceResp),
+                    },
+                    {
+                      label: '编辑',
+                      type: 'primary',
+                      hidden: !userStore.hasPermission('biz:customer:edit'),
+                      onClick: () => openInvoiceEdit(row as CustomerInvoiceResp),
+                    },
+                    {
+                      label: '删除',
+                      type: 'danger',
+                      hidden: !userStore.hasPermission('biz:customer:edit'),
+                      onClick: () => removeInvoice(row as CustomerInvoiceResp),
+                    },
+                  ]"
+                />
               </template>
             </el-table-column>
           </el-table>
@@ -379,6 +617,89 @@ async function beforeUpload(file: File): Promise<boolean> {
       </el-tabs>
       </div>
     </el-drawer>
+
+    <!-- 联系人表单 -->
+    <el-dialog
+      v-model="contactDialogVisible"
+      :title="contactEditingId ? '编辑联系人' : '新增联系人'"
+      width="560px"
+    >
+      <el-form v-loading="contactFormLoading" :model="contactForm" label-width="100px">
+        <el-form-item label="姓名" required>
+          <el-input v-model="contactForm.contactName" placeholder="必填" />
+        </el-form-item>
+        <el-form-item label="职务">
+          <el-input v-model="contactForm.title" placeholder="选填" />
+        </el-form-item>
+        <el-form-item label="电话">
+          <el-input v-model="contactForm.phone" placeholder="与手机至少填写一个" />
+        </el-form-item>
+        <el-form-item label="手机">
+          <el-input v-model="contactForm.mobile" placeholder="与电话至少填写一个" />
+        </el-form-item>
+        <el-form-item label="邮箱">
+          <el-input v-model="contactForm.email" />
+        </el-form-item>
+        <el-form-item label="设为默认">
+          <el-switch v-model="contactForm.isDefault" :active-value="1" :inactive-value="0" />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="contactForm.remark" type="textarea" :rows="2" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="contactDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="contactFormLoading" @click="submitContactForm">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 开票信息表单 -->
+    <el-dialog
+      v-model="invoiceDialogVisible"
+      :title="invoiceEditingId ? '编辑开票信息' : '新增开票信息'"
+      width="560px"
+    >
+      <el-form v-loading="invoiceFormLoading" :model="invoiceForm" label-width="100px">
+        <el-form-item label="开票名称" required>
+          <el-input v-model="invoiceForm.invoiceTitle" placeholder="必填" />
+        </el-form-item>
+        <el-form-item label="纳税人识别号">
+          <el-input v-model="invoiceForm.taxNo" />
+        </el-form-item>
+        <el-form-item label="发票类型">
+          <el-select v-model="invoiceForm.invoiceType" placeholder="请选择" style="width: 100%">
+            <el-option
+              v-for="item in invoiceTypeOptions"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="开户行">
+          <el-input v-model="invoiceForm.bankName" />
+        </el-form-item>
+        <el-form-item label="银行账号">
+          <el-input v-model="invoiceForm.bankAccount" />
+        </el-form-item>
+        <el-form-item label="开票地址">
+          <el-input v-model="invoiceForm.invoiceAddress" />
+        </el-form-item>
+        <el-form-item label="开票电话">
+          <el-input v-model="invoiceForm.invoicePhone" />
+        </el-form-item>
+        <el-form-item label="设为默认">
+          <el-switch v-model="invoiceForm.isDefault" :active-value="1" :inactive-value="0" />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="invoiceForm.remark" type="textarea" :rows="2" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="invoiceDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="invoiceFormLoading" @click="submitInvoiceForm">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -388,5 +709,10 @@ async function beforeUpload(file: File): Promise<boolean> {
     display: inline-flex;
     margin-left: 8px;
   }
+}
+
+/* 详情抽屉子表工具栏（新增按钮） */
+.detail-toolbar {
+  margin-bottom: 8px;
 }
 </style>

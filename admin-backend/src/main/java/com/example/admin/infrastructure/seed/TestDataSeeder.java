@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.admin.common.constant.Constants;
 import com.example.admin.domain.model.order.OrderStatus;
 import com.example.admin.domain.model.shipment.ShipmentType;
+import com.example.admin.infrastructure.persistence.mapper.BizCustomerContactMapper;
+import com.example.admin.infrastructure.persistence.mapper.BizCustomerInvoiceMapper;
 import com.example.admin.infrastructure.persistence.mapper.BizCustomerMapper;
 import com.example.admin.infrastructure.persistence.mapper.BizCustomerOpeningMapper;
 import com.example.admin.infrastructure.persistence.mapper.BizReceiptMapper;
@@ -13,6 +15,8 @@ import com.example.admin.infrastructure.persistence.mapper.BizShipmentMapper;
 import com.example.admin.infrastructure.persistence.mapper.BizStatementLineMapper;
 import com.example.admin.infrastructure.persistence.mapper.BizStatementMapper;
 import com.example.admin.infrastructure.persistence.po.BizCustomer;
+import com.example.admin.infrastructure.persistence.po.BizCustomerContact;
+import com.example.admin.infrastructure.persistence.po.BizCustomerInvoice;
 import com.example.admin.infrastructure.persistence.po.BizCustomerOpening;
 import com.example.admin.infrastructure.persistence.po.BizReceipt;
 import com.example.admin.infrastructure.persistence.po.BizSalesOrder;
@@ -65,6 +69,8 @@ public class TestDataSeeder implements ApplicationRunner {
     private static final LocalDateTime OPENING_AS_OF = LocalDateTime.of(2026, 7, 31, 23, 59, 59);
 
     private final BizCustomerMapper customerMapper;
+    private final BizCustomerContactMapper contactMapper;
+    private final BizCustomerInvoiceMapper invoiceMapper;
     private final BizSalesOrderMapper orderMapper;
     private final BizSalesOrderItemMapper orderItemMapper;
     private final BizShipmentMapper shipmentMapper;
@@ -75,6 +81,8 @@ public class TestDataSeeder implements ApplicationRunner {
 
     @Autowired
     public TestDataSeeder(BizCustomerMapper customerMapper,
+                          BizCustomerContactMapper contactMapper,
+                          BizCustomerInvoiceMapper invoiceMapper,
                           BizSalesOrderMapper orderMapper,
                           BizSalesOrderItemMapper orderItemMapper,
                           BizShipmentMapper shipmentMapper,
@@ -83,6 +91,8 @@ public class TestDataSeeder implements ApplicationRunner {
                           BizStatementMapper statementMapper,
                           BizStatementLineMapper statementLineMapper) {
         this.customerMapper = customerMapper;
+        this.contactMapper = contactMapper;
+        this.invoiceMapper = invoiceMapper;
         this.orderMapper = orderMapper;
         this.orderItemMapper = orderItemMapper;
         this.shipmentMapper = shipmentMapper;
@@ -136,6 +146,12 @@ public class TestDataSeeder implements ApplicationRunner {
         orderMapper.delete(new LambdaQueryWrapper<BizSalesOrder>()
                 .in(BizSalesOrder::getCustomerId, customerIds));
 
+        // 联系人 / 开票信息（子表先于客户删除，避免悬挂数据）
+        contactMapper.delete(new LambdaQueryWrapper<BizCustomerContact>()
+                .in(BizCustomerContact::getCustomerId, customerIds));
+        invoiceMapper.delete(new LambdaQueryWrapper<BizCustomerInvoice>()
+                .in(BizCustomerInvoice::getCustomerId, customerIds));
+
         // 出货 / 收款 / 期初 / 客户
         shipmentMapper.delete(new LambdaQueryWrapper<BizShipment>()
                 .in(BizShipment::getCustomerId, customerIds));
@@ -159,6 +175,12 @@ public class TestDataSeeder implements ApplicationRunner {
         {
             long cid = seedCustomer("深圳市华强电子科技有限公司", "TC-0001",
                     "广东省深圳市福田区振华路 45 号", money("120000"));
+            seedContact(cid, "王志强", "采购经理", "0755-83210011", "13823668801", "wangzq@hq-dz.com.cn", true);
+            seedContact(cid, "刘晓敏", "财务主管", "0755-83210012", "13723451122", "liuxm@hq-dz.com.cn", false);
+            seedInvoice(cid, "深圳市华强电子科技有限公司", "91440300MA5F2K1X9B", "招商银行深圳分行营业部",
+                    "755901248310801", "广东省深圳市福田区振华路 45 号", "0755-83210011", "SPECIAL", true);
+            seedInvoice(cid, "深圳市华强电子科技有限公司", "91440300MA5F2K1X9B", "招商银行深圳分行营业部",
+                    "755901248310801", "广东省深圳市福田区振华路 45 号", "0755-83210011", "NORMAL", false);
             BizSalesOrder order = seedOrder(cid, 1001, "PO-KH-2026-0801", "MONTHLY", "LOGISTICS",
                     LocalDateTime.of(2026, 8, 5, 10, 0));
             List<BizSalesOrderItem> items = new ArrayList<>();
@@ -174,6 +196,10 @@ public class TestDataSeeder implements ApplicationRunner {
         {
             long cid = seedCustomer("广州联控自动化设备有限公司", "TC-0002",
                     "广东省广州市黄埔区科学城彩频路 7 号", money("0"));
+            seedContact(cid, "陈立群", "采购总监", "020-82336601", "13902253366", "chenlq@liankong-gz.com", true);
+            seedContact(cid, "黄美玲", "采购员", "020-82336602", "13622889901", "huangml@liankong-gz.com", false);
+            seedInvoice(cid, "广州联控自动化设备有限公司", "91440101MA5W3L2Y8C", "中国工商银行广州黄埔支行",
+                    "3602000619200034567", "广东省广州市黄埔区科学城彩频路 7 号", "020-82336600", "SPECIAL", true);
             BizSalesOrder order = seedOrder(cid, 1002, "PO-GZ-2026-0802", "MONTHLY60", "FACTORY",
                     LocalDateTime.of(2026, 8, 8, 10, 0));
             List<BizSalesOrderItem> items = new ArrayList<>();
@@ -187,6 +213,10 @@ public class TestDataSeeder implements ApplicationRunner {
         {
             long cid = seedCustomer("苏州精密仪器股份有限公司", "TC-0003",
                     "江苏省苏州市工业园区金鸡湖大道 1355 号", money("50000"));
+            seedContact(cid, "周文斌", "供应链经理", "0512-62881101", "13862098811", "zhouwb@sz-precision.com", true);
+            seedContact(cid, "顾丽华", "财务经理", "0512-62881102", "13962117782", "gulh@sz-precision.com", false);
+            seedInvoice(cid, "苏州精密仪器股份有限公司", "91320505MA5N4M3Z7D", "中国银行苏州工业园区支行",
+                    "497758849211", "江苏省苏州市工业园区金鸡湖大道 1355 号", "0512-62881100", "SPECIAL", true);
             BizSalesOrder order = seedOrder(cid, 1003, "PO-SZ-2026-0803", "MONTHLY", "EXPRESS",
                     LocalDateTime.of(2026, 8, 10, 10, 0));
             List<BizSalesOrderItem> items = new ArrayList<>();
@@ -202,6 +232,9 @@ public class TestDataSeeder implements ApplicationRunner {
         {
             long cid = seedCustomer("北京中创系统集成有限公司", "TC-0004",
                     "北京市海淀区上地信息路 2 号", money("30000"));
+            seedContact(cid, "孙浩", "项目经理", "010-82890011", "13810169901", "sunhao@zc-system.com", true);
+            seedInvoice(cid, "北京中创系统集成有限公司", "91110108MA5P6N4A6E", "中国建设银行北京上地支行",
+                    "11050188360000002345", "北京市海淀区上地信息路 2 号", "010-82890000", "SPECIAL", true);
             BizSalesOrder order = seedOrder(cid, 1004, "PO-BJ-2026-0804", "CASH", "EXPRESS",
                     LocalDateTime.of(2026, 8, 12, 10, 0));
             List<BizSalesOrderItem> items = new ArrayList<>();
@@ -213,6 +246,10 @@ public class TestDataSeeder implements ApplicationRunner {
         {
             long cid = seedCustomer("东莞智造电子有限公司", "TC-0005",
                     "广东省东莞市长安镇振安中路 8 号", money("20000"));
+            seedContact(cid, "梁嘉欣", "采购主管", "0769-85551101", "13790336655", "liangjx@dg-zhizao.com", true);
+            seedContact(cid, "罗德全", "总经理助理", "0769-85551102", "13527998811", "luodq@dg-zhizao.com", false);
+            seedInvoice(cid, "东莞智造电子有限公司", "91441900MA5Q7P5B3F", "中国农业银行东莞长安支行",
+                    "44272801040012345", "广东省东莞市长安镇振安中路 8 号", "0769-85551100", "SPECIAL", true);
             BizSalesOrder order = seedOrder(cid, 1005, "PO-DG-2026-0805", "MONTHLY", "LOGISTICS",
                     LocalDateTime.of(2026, 8, 15, 10, 0));
             List<BizSalesOrderItem> items = new ArrayList<>();
@@ -230,6 +267,10 @@ public class TestDataSeeder implements ApplicationRunner {
         {
             long cid = seedCustomer("武汉光谷测控技术有限公司", "TC-0006",
                     "湖北省武汉市东湖高新区光谷大道 77 号", money("8000"));
+            seedContact(cid, "程雨欣", "商务经理", "027-87108801", "13871559901", "chengyx@wh-guanggu.com", true);
+            seedContact(cid, "叶志明", "技术工程师", "027-87108802", "13607117782", "yezm@wh-guanggu.com", false);
+            seedInvoice(cid, "武汉光谷测控技术有限公司", "91420100MA5R8Q6C2G", "交通银行武汉光谷支行",
+                    "42186988800123456789", "湖北省武汉市东湖高新区光谷大道 77 号", "027-87108800", "SPECIAL", true);
             BizSalesOrder order = seedOrder(cid, 1006, "PO-WH-2026-0806", "MONTHLY", "LOGISTICS",
                     LocalDateTime.of(2026, 8, 18, 10, 0));
             List<BizSalesOrderItem> items = new ArrayList<>();
@@ -260,6 +301,38 @@ public class TestDataSeeder implements ApplicationRunner {
         openingPo.setRemark("期初应收（种子数据）");
         openingMapper.insert(openingPo);
         return customer.getId();
+    }
+
+    /** 灌入一条联系人（默认唯一性由业务接口保证，种子数据直接写库） */
+    private void seedContact(long customerId, String name, String title, String phone,
+                             String mobile, String email, boolean isDefault) {
+        BizCustomerContact po = new BizCustomerContact();
+        po.setCustomerId(customerId);
+        po.setContactName(name);
+        po.setTitle(title);
+        po.setPhone(phone);
+        po.setMobile(mobile);
+        po.setEmail(email);
+        po.setIsDefault(isDefault ? 1 : 0);
+        po.setStatus(1);
+        contactMapper.insert(po);
+    }
+
+    /** 灌入一条开票信息 */
+    private void seedInvoice(long customerId, String title, String taxNo, String bankName,
+                             String bankAccount, String address, String phone, String type, boolean isDefault) {
+        BizCustomerInvoice po = new BizCustomerInvoice();
+        po.setCustomerId(customerId);
+        po.setInvoiceTitle(title);
+        po.setTaxNo(taxNo);
+        po.setBankName(bankName);
+        po.setBankAccount(bankAccount);
+        po.setInvoiceAddress(address);
+        po.setInvoicePhone(phone);
+        po.setInvoiceType(type);
+        po.setIsDefault(isDefault ? 1 : 0);
+        po.setStatus(1);
+        invoiceMapper.insert(po);
     }
 
     private BizSalesOrder seedOrder(long customerId, int seq, String customerOrderNo, String settle,
