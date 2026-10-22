@@ -19,6 +19,8 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.NoHandlerFoundException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.stream.Collectors;
 
@@ -152,13 +154,6 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * 兜底异常处理：记录完整堆栈，返回通用提示。
-     *
-     * @param e       异常
-     * @param request 当前请求
-     * @return 500 响应（不含堆栈）
-     */
-    /**
      * 参数类型转换失败：例如 {@code /system/online/devices/abc}、请求体里 ID 传了非数字。
      *
      * <p>不加这个 handler 时，这些输入会落到下面的兜底分支变成 500 + 一条完整堆栈：
@@ -170,6 +165,31 @@ public class GlobalExceptionHandler {
         return R.fail(ResultCode.PARAM_ERROR.getCode(), "参数格式不正确");
     }
 
+    /**
+     * 静态资源或接口路径不存在：返回 404，且只记 DEBUG、不打堆栈。
+     *
+     * <p>不加这个 handler 时，浏览器自动请求 {@code /favicon.ico}、扫描器探测
+     * {@code /wp-login.php} 之类都会落进下面的兜底分支，变成 500 + 一整条堆栈：
+     * 既把"资源不存在"误报成服务端故障，也把真实故障淹没在噪音里。不存在就是 404。
+     *
+     * @param e       异常
+     * @param request 当前请求
+     * @return 404 响应
+     */
+    @ExceptionHandler({NoResourceFoundException.class, NoHandlerFoundException.class})
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public R<Void> handleNotFound(Exception e, HttpServletRequest request) {
+        log.debug("资源不存在 uri={}", request.getRequestURI());
+        return R.fail(ResultCode.NOT_FOUND);
+    }
+
+    /**
+     * 兜底异常处理：记录完整堆栈，返回通用提示。
+     *
+     * @param e       异常
+     * @param request 当前请求
+     * @return 500 响应（不含堆栈）
+     */
     @ExceptionHandler(Exception.class)
     @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
     public R<Void> handleException(Exception e, HttpServletRequest request) {
