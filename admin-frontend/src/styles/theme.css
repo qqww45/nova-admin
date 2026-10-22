@@ -185,6 +185,8 @@ html.dark {
   --el-border-color-light: var(--admin-border-color);
   --el-border-color-lighter: var(--admin-border-color);
   --el-fill-color-blank: var(--admin-bg-page);
+  /* 表格内编辑态控件：比表格底色（--admin-bg-page）亮一档 */
+  --admin-editable-cell-bg: #1e293b;
   --el-fill-color: #1e293b;
   --el-fill-color-light: #1e293b;
   --el-fill-color-lighter: #172033;

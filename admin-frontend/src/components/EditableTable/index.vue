@@ -74,16 +74,37 @@ const rows = computed({
 /**
  * 行级错误：返回「行号 → 第一个错误文案」。
  * 用于把有问题的行整行标红，用户一眼能定位。
+ *
+ * <p>尚未开始填写的行不参与校验：录入区常驻若干空行是正常形态，
+ * 且空白行往往带有默认值（如出货日期预填今天），并非"全空"。
+ * 这里以行工厂产出的基准行做比对，只要用户没改动过任何字段就不提示，
+ * 避免整屏待录入行被误标成一片红，盖住真正需要关注的行。
  */
+const blankRowBaseline = computed<Record<string, unknown>>(
+  () => props.rowFactory() as Record<string, unknown>,
+);
+
+/** 行是否与空白基准一致（用户未填写任何字段） */
+function isUntouchedRow(cells: Record<string, unknown>): boolean {
+  const baseline = blankRowBaseline.value;
+  return props.columns.every(
+    (column) => String(cells[column.prop] ?? '') === String(baseline[column.prop] ?? ''),
+  );
+}
+
 const rowErrors = computed<Record<number, string>>(() => {
   const errors: Record<number, string> = {};
   rows.value.forEach((row, index) => {
+    const cells = row as Record<string, unknown>;
+    if (isUntouchedRow(cells)) {
+      return;
+    }
     for (const column of props.columns) {
-      if (column.required && isBlank((row as Record<string, unknown>)[column.prop])) {
+      if (column.required && isBlank(cells[column.prop])) {
         errors[index] = `${column.label}不能为空`;
         return;
       }
-      const message = column.validate?.(row as unknown as Record<string, unknown>);
+      const message = column.validate?.(cells);
       if (message) {
         errors[index] = message;
         return;
@@ -403,6 +424,13 @@ defineExpose({ addRow, hasError, rowErrors });
 <style scoped lang="scss">
 .editable-table {
   width: 100%;
+
+  /* 编辑态控件底色：用主题令牌提亮一档（暗色下与表格底色拉开层次），
+     "可编辑区域"一眼可辨；输入框自身只保留 1px 描边，不做重边框。 */
+  :deep(.el-input__wrapper),
+  :deep(.el-select__wrapper) {
+    background-color: var(--admin-editable-cell-bg);
+  }
 
   /* 服务端计算列用浅灰底区分，明确"这列不能改" */
   :deep(.is-computed-col) {

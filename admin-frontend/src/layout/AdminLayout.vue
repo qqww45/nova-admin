@@ -86,7 +86,11 @@ const sidebarWidth = computed(() =>
 
   &__main {
     padding: 0;
-    overflow: hidden;
+    /* 内容区纵向滚动：页面超高（如出货页"录入区 + 列表"）时，
+       分页等底部内容必须能滚动到，不能被裁掉；
+       横向滚动一律禁止，宽表格由自身处理。 */
+    overflow-x: hidden;
+    overflow-y: auto;
     background-color: var(--admin-bg-color);
   }
 }
