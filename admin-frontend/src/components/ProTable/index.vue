@@ -249,7 +249,7 @@ function onSizeChange(size: number): void {
           :current-page="pageNum"
           :page-size="pageSize"
           :total="total"
-          :page-sizes="[10, 20, 50, 100]"
+          :page-sizes="[10, 20, 50, 100, 200, 500]"
           layout="total, sizes, prev, pager, next, jumper"
           background
           @current-change="onCurrentChange"

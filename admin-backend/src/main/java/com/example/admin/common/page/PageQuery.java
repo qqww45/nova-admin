@@ -15,7 +15,7 @@ import java.io.Serializable;
  *
  * <p>所有分页接口入参继承本类，统一约束：
  * <ul>
- *     <li>pageNum 最小 1，pageSize 最大 100，防止一次拉全表造成数据库压力；</li>
+ *     <li>pageNum 最小 1，pageSize 最大 {@value #MAX_PAGE_SIZE}，兼顾下拉/导出场景又防止一次拉全表；</li>
  *     <li>排序字段必须匹配 {@code ^[A-Za-z_][A-Za-z0-9_]*$}（白名单思想），
  *         因为 MyBatis-Plus 的 {@link OrderItem} 会直接拼接字段名到 ORDER BY，
  *         若不做限制将产生 SQL 注入风险。</li>
@@ -36,16 +36,20 @@ public class PageQuery implements Serializable {
     /** 默认每页条数 */
     public static final int DEFAULT_PAGE_SIZE = 10;
 
-    /** 每页最大条数（防止恶意大分页拖垮数据库） */
-    public static final int MAX_PAGE_SIZE = 100;
+    /**
+     * 每页最大条数。
+     *
+     * <p>既要满足用户列表/下拉/导出等"一屏看更多"的场景，又设置上限防止恶意大分页拖垮数据库。
+     */
+    public static final int MAX_PAGE_SIZE = 1000;
 
     @Schema(description = "页码，从 1 开始", example = "1")
     @Min(value = 1, message = "页码最小为 1")
     private Integer pageNum = DEFAULT_PAGE_NUM;
 
-    @Schema(description = "每页条数，最大 100", example = "10")
+    @Schema(description = "每页条数，最大 1000", example = "10")
     @Min(value = 1, message = "每页条数最小为 1")
-    @Max(value = MAX_PAGE_SIZE, message = "每页条数最大为 100")
+    @Max(value = MAX_PAGE_SIZE, message = "每页条数最大为 " + PageQuery.MAX_PAGE_SIZE)
     private Integer pageSize = DEFAULT_PAGE_SIZE;
 
     @Schema(description = "排序字段（数据库列名，驼峰或下划线均可）", example = "create_time")
