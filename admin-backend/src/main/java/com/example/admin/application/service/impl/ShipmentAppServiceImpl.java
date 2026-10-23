@@ -213,15 +213,21 @@ public class ShipmentAppServiceImpl implements ShipmentAppService {
         if (row.getQty() == null || row.getQty().compareTo(BigDecimal.ZERO) <= 0) {
             throw new BusinessException("出货数量必须大于 0");
         }
-        Long customerId = IdParser.parseId(row.getCustomerId());
-        if (row.getCustomerId() != null && customerId == null) {
+        // 客户与业务员均为必填（biz_shipment 两列都是 NOT NULL，导入映射同样 required=1）。
+        // 用 parseIdOrNull 而不是 parseId：后者对空串直接抛"ID不能为空"，
+        // 既掩盖了真实原因，也让下面"填了才校验存在性"的分支成为永远不成立死的代码
+        Long customerId = IdParser.parseIdOrNull(row.getCustomerId());
+        if (customerId == null) {
+            throw new BusinessException("客户不能为空");
+        }
+        if (customerRepository.findById(customerId) == null) {
             throw new BusinessException("客户不存在：" + row.getCustomerId());
         }
-        if (customerId != null && customerRepository.findById(customerId) == null) {
-            throw new BusinessException("客户不存在：" + row.getCustomerId());
+        Long salesmanId = IdParser.parseIdOrNull(row.getSalesmanId());
+        if (salesmanId == null) {
+            throw new BusinessException("业务员不能为空");
         }
-        Long salesmanId = IdParser.parseId(row.getSalesmanId());
-        if (row.getSalesmanId() != null && salesmanId == null) {
+        if (userRepository.findNames(List.of(salesmanId)).isEmpty()) {
             throw new BusinessException("业务员不存在：" + row.getSalesmanId());
         }
 

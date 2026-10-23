@@ -83,6 +83,27 @@ export type RequestConfig = AxiosRequestConfig & { silentError?: boolean };
 
 service.interceptors.response.use(
   (response) => {
+    // 二进制下载（导入模板 / 导出 / 错误清单 / 对账单导出）：responseType=blob 时
+    // 响应体是文件流，没有 R<T> 外壳。原先无条件按 R<T> 解析，Blob 上取不到 code，
+    // 于是每次下载都被判为"业务失败"——弹"请求失败"且文件拿不到，下载全挂。
+    // 这里直接放行 Blob；若服务端把业务错误包成了 JSON（如"该批次没有失败行"），
+    // 读出 msg 弹提示并拒绝，避免把错误 JSON 当成 xlsx 存到磁盘
+    if (response.config.responseType === 'blob') {
+      const blob = response.data as Blob;
+      if (blob.type && blob.type.includes('json')) {
+        return blob.text().then((text) => {
+          let msg = '下载失败';
+          try {
+            msg = (JSON.parse(text) as R<unknown>).msg || msg;
+          } catch {
+            // 非 R 结构的 JSON：保留默认文案
+          }
+          ElMessage.error(msg);
+          return Promise.reject(new Error(msg));
+        });
+      }
+      return blob as never;
+    }
     const body = response.data as R<unknown>;
     if (body.code === 200) {
       return body.data as never;
@@ -125,8 +146,20 @@ service.interceptors.response.use(
     }
 
     // 无 response：区分"被取消"与真正的网络故障，避免笼统的"网络异常（未知）"
-    const message =
-      error.response?.data?.msg ??
+    // 二进制下载失败时响应体是 Blob（服务端 JSON 错误被按二进制收了），先读出文本再取 msg
+    let message: string | undefined;
+    const errorData = error.response?.data as unknown;
+    if (errorData instanceof Blob) {
+      try {
+        message = (JSON.parse(await errorData.text()) as R<unknown>).msg;
+      } catch {
+        message = undefined;
+      }
+    } else {
+      message = (errorData as R<unknown> | undefined)?.msg;
+    }
+    const finalMessage =
+      message ??
       (status === 403
         ? '没有权限访问该资源'
         : status === 404
@@ -134,7 +167,7 @@ service.interceptors.response.use(
           : status
             ? `网络异常（${status}）`
             : '网络连接异常，请检查网络后重试');
-    ElMessage.error(message);
+    ElMessage.error(finalMessage);
     return Promise.reject(error);
   },
 );

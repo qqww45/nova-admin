@@ -310,12 +310,21 @@ async function doIssue(id: string): Promise<void> {
 }
 
 async function doConfirm(id: string): Promise<void> {
+  // 确认说明会随操作日志落库（审计用途），服务端 @NotBlank 强制必填。
+  // 原先这里丢弃了 prompt 的返回值、固定传空串，每次点"客户确认"都撞服务端校验，
+  // 报"reason: 请填写操作原因"——必须把用户输入原样带回，并前置拦截空值
+  let reason = '';
   try {
-    await ElMessageBox.prompt('确认无误请填写确认说明（可留空）', '客户确认', { inputType: 'textarea' });
+    const { value } = await ElMessageBox.prompt(
+      '请填写确认说明（客户回签意见，将记录到操作日志）',
+      '客户确认',
+      { inputType: 'textarea', inputPattern: /\S+/, inputErrorMessage: '确认说明不能为空' },
+    );
+    reason = value.trim();
   } catch {
     return;
   }
-  await statementApi.confirm(id, '');
+  await statementApi.confirm(id, reason);
   ElMessage.success('已确认');
   detailVisible.value = false;
   reload();

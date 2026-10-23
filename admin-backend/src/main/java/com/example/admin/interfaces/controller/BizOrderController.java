@@ -26,6 +26,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
@@ -177,8 +178,10 @@ public class BizOrderController {
     @PreAuthorize("@ss.hasPermi('biz:order:reconcile')")
     @Operation(summary = "明细对账")
     public R<Void> reconcile(@RequestParam String itemIds,
-                             @RequestParam(required = false) LocalDateTime date) {
-        orderService.reconcile(Arrays.asList(itemIds.split(",")), date);
+                             @RequestParam(required = false) LocalDate date) {
+        // date 按 LocalDate 接收：调用方（前端日期选择器）传的是 "2026-10-20" 这类日期串，
+        // 用 LocalDateTime 直接绑会因缺时间部分报"日期格式不正确"；这里统一取当天零点
+        orderService.reconcile(Arrays.asList(itemIds.split(",")), date == null ? null : date.atStartOfDay());
         return R.ok();
     }
 }

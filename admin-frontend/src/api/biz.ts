@@ -133,8 +133,16 @@ export const orderApi = {
     return http.put<void>(`/biz/order/${id}/cancel`, { reason });
   },
 
+  /**
+   * 明细对账（传 date 为空表示撤销对账）。
+   *
+   * <p>服务端是 @RequestParam（查询参数）而不是 @RequestBody，
+   * 原先发 JSON body 会直接报"缺少请求参数 itemIds"——对账功能整个不可用。
+   */
   reconcile(itemIds: string[], date?: string): Promise<void> {
-    return http.put<void>('/biz/order/reconcile', { itemIds: itemIds.join(','), date });
+    return http.put<void>('/biz/order/reconcile', undefined, {
+      params: { itemIds: itemIds.join(','), date },
+    });
   },
 };
 

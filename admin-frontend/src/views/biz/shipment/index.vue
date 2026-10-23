@@ -77,6 +77,7 @@ const draftColumns = computed<EditableColumn[]>(() => [
     label: '业务',
     width: 120,
     type: 'select',
+    required: true,
     options: salesmanOptions.value.map((item) => ({ label: item.name, value: item.id })),
   },
   {

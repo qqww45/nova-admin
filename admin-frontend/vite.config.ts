@@ -69,7 +69,8 @@ export default defineConfig({
     open: false,
     proxy: {
       '/api': {
-        target: 'http://localhost:8080',
+        // 默认转发到后端 8080；本机端口被占用时可用 VITE_DEV_API_TARGET 覆盖（如 http://localhost:8081）
+        target: process.env.VITE_DEV_API_TARGET || 'http://localhost:8080',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ''),
       },
