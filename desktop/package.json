@@ -1,0 +1,79 @@
+{
+  "name": "hengzhang",
+  "version": "1.1.2",
+  "description": "衡账 — 金蝶云·星空独立对账桌面工具",
+  "main": "./out/main/index.js",
+  "author": "一恒科",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder --win nsis",
+    "dist:cn": "npm run build && node scripts/dist-cn.mjs",
+    "rebuild": "electron-rebuild -f -w better-sqlite3",
+    "m0": "node scripts/m0-probe.mjs"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "electron-updater": "^6.3.9",
+    "exceljs": "^4.4.0",
+    "pinia": "^2.3.1",
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.0"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^3.7.1",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "electron": "^34.0.0",
+    "electron-builder": "^25.1.8",
+    "electron-vite": "^2.3.0",
+    "typescript": "^5.7.3",
+    "vite": "^5.4.14",
+    "vue-tsc": "^2.2.0"
+  },
+  "build": {
+    "appId": "com.yihengke.hengzhang",
+    "productName": "衡账",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "resources",
+        "to": "resources",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "asarUnpack": [
+      "**/*.{node,dll}"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "qqww45",
+        "repo": "hengzhang",
+        "releaseType": "release"
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "shortcutName": "衡账"
+    }
+  }
+}
