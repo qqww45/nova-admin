@@ -3,12 +3,13 @@ import { computed, onMounted, ref, watch } from 'vue'
 import PageHeader from '../components/ui/PageHeader.vue'
 import HzField from '../components/ui/HzField.vue'
 import HzButton from '../components/ui/HzButton.vue'
+import HzSelect from '../components/ui/HzSelect.vue'
 import type { CustomerOption, StatementDTO } from '../../../shared/types'
 
 const customers = ref<CustomerOption[]>([])
 const customerFid = ref<number | null>(null)
-const fromMonth = ref('2026-03')
-const toMonth = ref('2026-08')
+const fromMonth = ref(localStorage.getItem('hz.fromMonth') || '2026-03')
+const toMonth = ref(localStorage.getItem('hz.toMonth') || '2026-08')
 const activeMonth = ref(0)
 const dto = ref<StatementDTO | null>(null)
 const loading = ref(false)
@@ -17,12 +18,30 @@ const message = ref('')
 
 const sheet = computed(() => dto.value?.sheets[activeMonth.value] || null)
 
+const customerOptions = computed(() =>
+  customers.value.map((c) => ({ value: c.fid, label: c.fname, sub: c.fnumber }))
+)
+
+const customerCount = computed(() => customers.value.length)
+
+function onCustomerPick(v: string | number) {
+  customerFid.value = Number(v)
+}
+
 onMounted(async () => {
   customers.value = await window.hengzhang.listCustomers()
-  if (customers.value.length) customerFid.value = customers.value[0].fid
+  // 恢复上次选择的客户，其次默认第一个
+  const saved = Number(localStorage.getItem('hz.customerFid'))
+  const hit = customers.value.find((c) => c.fid === saved)
+  if (customers.value.length) customerFid.value = (hit || customers.value[0]).fid
+  // 条件齐全时自动预览，省一次点击
+  if (customerFid.value) preview()
 })
 
 watch([customerFid, fromMonth, toMonth], () => {
+  if (customerFid.value) localStorage.setItem('hz.customerFid', String(customerFid.value))
+  localStorage.setItem('hz.fromMonth', fromMonth.value)
+  localStorage.setItem('hz.toMonth', toMonth.value)
   dto.value = null
   activeMonth.value = 0
 })
@@ -84,13 +103,13 @@ function money(n: number) {
     </PageHeader>
 
     <div class="filters panel rise">
-      <HzField label="客户">
-        <select v-model.number="customerFid">
-          <option disabled :value="null">请选择客户</option>
-          <option v-for="c in customers" :key="c.fid" :value="c.fid">
-            {{ c.fname }}（{{ c.fnumber }}）
-          </option>
-        </select>
+      <HzField label="客户" :hint="customerCount ? `${customerCount} 家，输入名称或编码可搜索` : '请先同步客户'">
+        <HzSelect
+          :model-value="customerFid"
+          :options="customerOptions"
+          placeholder="输入客户名称或编码搜索"
+          @update:model-value="onCustomerPick"
+        />
       </HzField>
       <HzField label="起始月">
         <input v-model="fromMonth" type="month" />
@@ -226,6 +245,10 @@ function money(n: number) {
   grid-template-columns: 1.4fr 0.8fr 0.8fr;
   gap: 14px;
   margin-bottom: 14px;
+  /* 面板的 backdrop-filter/transform 会形成层叠上下文，
+     提高层级避免下方的对账单预览盖住客户搜索下拉 */
+  position: relative;
+  z-index: 30;
 }
 
 .msg {

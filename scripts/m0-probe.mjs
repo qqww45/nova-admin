@@ -87,4 +87,23 @@ for (const [name, formId, keys] of [
   }
 }
 
-console.log('\n请对照金蝶界面锁定含税字段与源单/PO，写入 resources/mappings/')
+// 出库分录字段逐组探测，锁定数量/单价/金额/单位/源单号的真实字段名
+const lineCandidates = [
+  'FEntryID,FMaterialId.FNumber,FMaterialId.FName,FUnitID.FName,FRealQty,FTaxPrice,FAllAmount,FSrcBillNo,FEntryNote',
+  'FEntryID,FMaterialId.FNumber,FMaterialId.FName,FUnitID.FName,FQty,FTaxPrice,FAllAmount,FSrcBillNo,FEntryNote',
+  'FEntryID,FMaterialId.FNumber,FMaterialId.FName,FQty,FPrice,FAmount'
+]
+for (const keys of lineCandidates) {
+  try {
+    const rows = await query('SAL_OUTSTOCK', keys)
+    console.log('\nOUT_LINES OK →', keys)
+    if (Array.isArray(rows) && rows[0]) console.log(' sample', rows[0])
+    break
+  } catch (e) {
+    console.log('\nOUT_LINES FAIL →', keys)
+    console.log('  reason:', String(e && e.message ? e.message : e).slice(0, 300))
+  }
+}
+
+console.log('\n请对照金蝶界面锁定含税字段与源单/PO，写入 resources/mappings/outstock.json')
+console.log('客户采购订单号字段确认后，填到 outstock.json 的 customerPoField（如 F_PO_No）')

@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import PageHeader from '../components/ui/PageHeader.vue'
 import HzField from '../components/ui/HzField.vue'
 import HzButton from '../components/ui/HzButton.vue'
-import type { SyncProgress } from '../../../shared/types'
+import type { LastSyncStat, SyncProgress } from '../../../shared/types'
 
 const router = useRouter()
-const sinceDate = ref('2025-01-01')
+const sinceDate = ref(localStorage.getItem('hz.sinceDate') || '2025-01-01')
 const running = ref(false)
 const items = ref<SyncProgress[]>([
   { entity: 'customer', status: 'running', rowCount: 0, message: '等待开始' },
@@ -15,6 +15,7 @@ const items = ref<SyncProgress[]>([
   { entity: 'outbound', status: 'running', rowCount: 0, message: '等待开始' }
 ])
 const error = ref('')
+const lastStats = ref<LastSyncStat[]>([])
 
 const labels: Record<string, string> = {
   customer: '客户',
@@ -25,14 +26,48 @@ const labels: Record<string, string> = {
   invoice: '发票'
 }
 
+const lastSyncTime = computed(() => {
+  const times = lastStats.value.map((s) => s.finishedAt).filter(Boolean) as string[]
+  if (!times.length) return ''
+  const d = new Date(Math.max(...times.map((t) => new Date(t).getTime())))
+  if (Number.isNaN(d.getTime())) return ''
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+})
+
+const neverSynced = computed(
+  () => !lastStats.value.length && items.value.every((x) => !x.rowCount && x.message === '等待开始')
+)
+
 let off: (() => void) | undefined
 
-onMounted(() => {
+onMounted(async () => {
   off = window.hengzhang.onSyncProgress((p) => {
     const idx = items.value.findIndex((x) => x.entity === p.entity)
     if (idx >= 0) items.value[idx] = p
     else items.value.push(p)
   })
+
+  // 进入页面先恢复上次同步结果，而不是显示 0
+  try {
+    lastStats.value = await window.hengzhang.lastSyncStats()
+    if (lastStats.value.length) {
+      items.value = items.value.map((x) => {
+        const s = lastStats.value.find((t) => t.entity === x.entity)
+        return s
+          ? {
+              entity: x.entity,
+              status: s.status,
+              rowCount: s.rowCount,
+              message: s.message || '上次同步结果',
+              finishedAt: s.finishedAt || undefined
+            }
+          : x
+      })
+    }
+  } catch {
+    /* ignore */
+  }
 })
 
 onUnmounted(() => off?.())
@@ -40,6 +75,7 @@ onUnmounted(() => off?.())
 async function start() {
   running.value = true
   error.value = ''
+  localStorage.setItem('hz.sinceDate', sinceDate.value)
   items.value = items.value.map((x) => ({
     ...x,
     status: 'running',
@@ -49,6 +85,7 @@ async function start() {
   try {
     const res = await window.hengzhang.runSync({ sinceDate: sinceDate.value })
     items.value = res
+    lastStats.value = await window.hengzhang.lastSyncStats()
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   } finally {
@@ -74,6 +111,17 @@ function statusLabel(s: SyncProgress['status']) {
       <HzButton variant="ghost" :disabled="running" @click="router.push('/connect')">返回连接</HzButton>
       <HzButton :loading="running" @click="start">开始同步</HzButton>
     </PageHeader>
+
+    <div class="last-banner rise" v-if="!neverSynced">
+      <template v-if="lastSyncTime">
+        <b>上次同步</b>
+        <span>{{ lastSyncTime }}</span>
+        <span class="sep">·</span>
+        <span v-for="s in lastStats" :key="s.entity" class="stat">
+          {{ labels[s.entity] || s.entity }} {{ s.rowCount }}
+        </span>
+      </template>
+    </div>
 
     <div class="toolbar panel rise">
       <HzField label="起始业务日期" hint="首次可拉近 12～24 个月；之后可按需重拉">
@@ -101,7 +149,7 @@ function statusLabel(s: SyncProgress['status']) {
           <span class="num">{{ it.rowCount }}</span>
           <span class="unit">行</span>
         </div>
-        <p>{{ it.message || '—' }}</p>
+        <p>{{ it.message || (it.rowCount ? '上次同步结果' : '等待开始') }}</p>
       </article>
     </div>
 
@@ -134,6 +182,33 @@ function statusLabel(s: SyncProgress['status']) {
   gap: 18px;
   align-items: end;
   margin-bottom: 18px;
+}
+
+.last-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 11px 16px;
+  margin-bottom: 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(61, 220, 151, 0.28);
+  background: rgba(61, 220, 151, 0.06);
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.last-banner b {
+  color: #b6f5d4;
+  font-weight: 600;
+}
+
+.last-banner .sep {
+  color: var(--text-faint);
+}
+
+.last-banner .stat {
+  color: var(--text);
 }
 
 .note {

@@ -6,6 +6,10 @@ import type {
   EnvDetectResult,
   ConnectionTestResult,
   CustomerOption,
+  MappingApplyInput,
+  MappingState,
+  ProbeReport,
+  LastSyncStat,
   StatementDTO,
   StatementPreviewQuery,
   SyncProgress,
@@ -20,7 +24,13 @@ const api = {
     ipcRenderer.invoke('config:save', input),
   detectEnv: (): Promise<EnvDetectResult> => ipcRenderer.invoke('config:detectEnv'),
   testConnection: (): Promise<ConnectionTestResult> => ipcRenderer.invoke('config:test'),
+  runProbe: (): Promise<ProbeReport> => ipcRenderer.invoke('config:probe'),
+  getMapping: (): Promise<MappingState> => ipcRenderer.invoke('mapping:get'),
+  applyMapping: (input: MappingApplyInput): Promise<MappingState> =>
+    ipcRenderer.invoke('mapping:apply', input),
+  resetMapping: (): Promise<MappingState> => ipcRenderer.invoke('mapping:reset'),
   runSync: (input: SyncStartInput): Promise<SyncProgress[]> => ipcRenderer.invoke('sync:run', input),
+  lastSyncStats: (): Promise<LastSyncStat[]> => ipcRenderer.invoke('sync:lastStats'),
   onSyncProgress: (cb: (p: SyncProgress) => void) => {
     const listener = (_: Electron.IpcRendererEvent, p: SyncProgress) => cb(p)
     ipcRenderer.on('sync:progress', listener)

@@ -1,6 +1,6 @@
 import ExcelJS from 'exceljs'
 import { join } from 'path'
-import { existsSync, mkdirSync } from 'fs'
+import { existsSync, mkdirSync, renameSync, unlinkSync } from 'fs'
 import { homedir } from 'os'
 import type { StatementDTO } from '../../shared/types'
 import { getPublicConfig } from '../configStore'
@@ -104,9 +104,7 @@ export async function exportStatementXlsx(dto: StatementDTO): Promise<string> {
     }
 
     const fileName = `${cfg.companyShortName || '公司'}---${dto.customerName}对帐单${formatStamp()}.xlsx`
-    const outPath = join(defaultExportDir(), fileName)
-    await wb.xlsx.writeFile(outPath)
-    return outPath
+    return await writeWithLockFallback(wb, defaultExportDir(), fileName)
   } finally {
     release('export')
   }
@@ -116,4 +114,56 @@ function formatStamp() {
   const d = new Date()
   const p = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}`
+}
+
+function timeHms() {
+  const d = new Date()
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
+}
+
+/**
+ * 先写临时文件，再改名到目标名；目标名被 Excel/WPS 占用时自动换带时刻的新文件名。
+ */
+async function writeWithLockFallback(
+  wb: ExcelJS.Workbook,
+  dir: string,
+  fileName: string
+): Promise<string> {
+  const tmpPath = join(dir, `.${fileName}.${process.pid}-${Date.now()}.tmp.xlsx`)
+  await wb.xlsx.writeFile(tmpPath)
+
+  const altName = `${fileName.replace(/\.xlsx$/i, '')}_${timeHms()}.xlsx`
+  const targets = [fileName, altName]
+
+  for (let i = 0; i < targets.length; i++) {
+    const target = join(dir, targets[i])
+    try {
+      renameSync(tmpPath, target)
+      return target
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException)?.code ?? ''
+      const locked = code === 'EBUSY' || code === 'EPERM' || code === 'EACCES'
+      if (i === targets.length - 1) {
+        try {
+          unlinkSync(tmpPath)
+        } catch {
+          /* ignore */
+        }
+        if (locked) {
+          throw new Error('导出失败：对账单文件正被 Excel/WPS 打开占用，请先关闭后重试')
+        }
+        throw e
+      }
+      if (!locked) {
+        try {
+          unlinkSync(tmpPath)
+        } catch {
+          /* ignore */
+        }
+        throw e
+      }
+    }
+  }
+  throw new Error('导出失败：无法写入目标文件')
 }

@@ -2,17 +2,31 @@ import { ipcMain, shell } from 'electron'
 import { getPublicConfig, saveConfig } from './configStore'
 import { getKingdee } from './kingdee/client'
 import { detectKingdeeEnv } from './kingdee/envDetect'
+import { runM0Probe } from './kingdee/probe'
 import { getDb } from './db'
-import { runSync, listCustomers } from './sync/runner'
+import { runSync, listCustomers, lastSyncStats } from './sync/runner'
 import { buildStatement } from './domain/statement'
 import { exportStatementXlsx } from './export/excel'
+import {
+  hasUserMapping,
+  loadOutstockMapping,
+  saveUserOutstockMapping,
+  clearUserOutstockMapping,
+  userMappingPath
+} from './mappingStore'
 import {
   checkForUpdatesManual,
   downloadUpdate,
   getUpdateStatus,
   quitAndInstall
 } from './updater'
-import type { AppConfigSaveInput, StatementPreviewQuery, SyncStartInput } from '../shared/types'
+import type {
+  AppConfigSaveInput,
+  MappingApplyInput,
+  ProbeReport,
+  StatementPreviewQuery,
+  SyncStartInput
+} from '../shared/types'
 import { app } from 'electron'
 import { getUserRoots } from './paths'
 
@@ -36,7 +50,40 @@ export function registerIpc() {
     return probe
   })
 
+  // 与「测试连接」彼此独立：登录 + 抽样三个单据 + 逐套试出库分录字段集
+  ipcMain.handle('config:probe', async (): Promise<ProbeReport> => {
+    const client = getKingdee()
+    const login = await client.login()
+    if (!login.ok) {
+      return {
+        ok: false,
+        loginMessage: login.message,
+        entities: [],
+        lineFieldSets: [],
+        finishedAt: new Date().toISOString()
+      }
+    }
+    return runM0Probe()
+  })
+
+  ipcMain.handle('mapping:get', () => ({
+    mapping: loadOutstockMapping(),
+    path: userMappingPath(),
+    userOverride: hasUserMapping()
+  }))
+
+  ipcMain.handle('mapping:apply', (_e, input: MappingApplyInput) => ({
+    mapping: saveUserOutstockMapping(input),
+    path: userMappingPath(),
+    userOverride: hasUserMapping()
+  }))
+  ipcMain.handle('mapping:reset', () => {
+    clearUserOutstockMapping()
+    return { mapping: loadOutstockMapping(), path: userMappingPath(), userOverride: false }
+  })
+
   ipcMain.handle('sync:run', async (_e, input: SyncStartInput) => runSync(input))
+  ipcMain.handle('sync:lastStats', () => lastSyncStats())
   ipcMain.handle('customers:list', () => listCustomers())
 
   ipcMain.handle('statement:preview', (_e, q: StatementPreviewQuery) =>

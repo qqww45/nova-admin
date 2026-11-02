@@ -18,6 +18,8 @@ npm run dev
 
 ## M0 探针
 
+命令行版（开发期用，需要本机 Node，可单独拷到客户机跑）：
+
 ```bash
 set HZ_SERVER=https://你的金蝶云域名
 set HZ_ACCT=数据中心内码
@@ -25,6 +27,11 @@ set HZ_USER=账号
 set HZ_PASS=密码
 npm run m0
 ```
+
+应用内版（客户用）：第一步「连接金蝶云」页的 **字段自检** 按钮，独立于「测试连接」，无需 Node。
+它登录后抽样客户 / 销售订单 / 出库单，并逐套试出库分录字段集，结果可「复制报告」回传，
+也可「应用到本机映射」——写入 `%LOCALAPPDATA%\衡账\mappings\outstock.json`，该文件优先于内置
+`resources/mappings/outstock.json`，升级不会被覆盖。
 
 ## 打包
 

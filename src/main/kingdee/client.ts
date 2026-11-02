@@ -2,6 +2,24 @@ import { getFullAuth } from '../configStore'
 
 type Json = unknown
 
+/**
+ * 金蝶出错时不一定走非 200：可能返回 {"Result":{"ResponseStatus":{"IsSuccess":false,"Errors":[...]}}}
+ * 甚至套一层数组。这里提取出错误消息，识别不到返回 null。
+ */
+export function extractKingdeeError(data: unknown): string | null {
+  const holder = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | undefined
+  const result = holder && typeof holder === 'object' && 'Result' in holder ? holder.Result : null
+  if (!result || typeof result !== 'object') return null
+  const rs = (result as Record<string, unknown>).ResponseStatus as
+    | { IsSuccess?: boolean; ErrorCode?: number; Errors?: Array<{ Message?: string }> }
+    | undefined
+  if (!rs || rs.IsSuccess !== false) return null
+  const msgs = Array.isArray(rs.Errors)
+    ? rs.Errors.map((e) => e?.Message).filter((m): m is string => Boolean(m))
+    : []
+  return msgs.join('；') || (rs.ErrorCode ? `错误码 ${rs.ErrorCode}` : '') || '未知错误'
+}
+
 export class KingdeeClient {
   private cookies = new Map<string, string>()
   private base = ''
@@ -81,6 +99,10 @@ export class KingdeeClient {
     })
     this.absorbSetCookie(res)
     const data = await res.json()
+    const kdErr = extractKingdeeError(data)
+    if (kdErr) {
+      throw new Error(`金蝶查询失败: ${kdErr}`)
+    }
     if (!Array.isArray(data)) {
       const msg =
         typeof data === 'object' && data && 'Result' in (data as object)
@@ -89,6 +111,31 @@ export class KingdeeClient {
       throw new Error(`查询返回异常: ${msg}`)
     }
     return data as Json[][]
+  }
+
+  /** 通用 WebAPI 服务调用：拿到单据元数据等（不同版本服务名不同，逐个试） */
+  async callService(service: string, parameters: unknown[]): Promise<Json> {
+    const url = `${this.base}/K3Cloud/${service}.common.kdsvc`
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Cookie: this.cookieHeader()
+      },
+      body: JSON.stringify({ parameters })
+    })
+    this.absorbSetCookie(res)
+    const text = await res.text()
+    let data: Json
+    try {
+      data = JSON.parse(text) as Json
+    } catch {
+      const head = text.replace(/\s+/g, ' ').slice(0, 120)
+      throw new Error(`服务 ${service} 返回非 JSON（HTTP ${res.status}）：${head}`)
+    }
+    const kdErr = extractKingdeeError(data)
+    if (kdErr) throw new Error(kdErr)
+    return data
   }
 
   async probeOutboundSample(): Promise<{ ok: boolean; message: string }> {

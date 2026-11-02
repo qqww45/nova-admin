@@ -7,6 +7,7 @@ import { getUserRoots } from './paths'
 interface StoredConfig {
   serverUrl: string
   acctId: string
+  acctName?: string
   username: string
   passwordEnc?: string
   companyName: string
@@ -52,6 +53,7 @@ export function getPublicConfig(): AppConfigPublic {
   return {
     serverUrl: c.serverUrl,
     acctId: c.acctId,
+    acctName: c.acctName || '',
     username: c.username,
     hasPassword: Boolean(c.passwordEnc),
     companyName: c.companyName,
@@ -69,6 +71,7 @@ export function saveConfig(input: AppConfigSaveInput): AppConfigPublic {
     ...cur,
     serverUrl: input.serverUrl.trim(),
     acctId: input.acctId.trim(),
+    acctName: (input.acctName || '').trim(),
     username: input.username.trim(),
     companyName: input.companyName.trim(),
     companyShortName: input.companyShortName.trim(),

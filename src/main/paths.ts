@@ -10,7 +10,8 @@ export function getUserRoots() {
     db: join(root, 'db'),
     backups: join(root, 'backups'),
     exports: join(root, 'exports'),
-    logs: join(root, 'logs')
+    logs: join(root, 'logs'),
+    mappings: join(root, 'mappings')
   }
   for (const d of Object.values(dirs)) {
     if (!existsSync(d)) mkdirSync(d, { recursive: true })

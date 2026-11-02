@@ -1,6 +1,7 @@
 {
   "formId": "SAL_OUTSTOCK",
   "fieldKeys": "FID,FBillNo,FDate,FCustomerID,FCustomerID.FName,FDocumentStatus,FCancelStatus",
-  "note": "M0 锁定后补齐分录：物料、数量、单价、金额、源单号、客户PO",
-  "lineFieldKeysDraft": "FEntity_FENTRYID,FMaterialId.FNumber,FMaterialId.FName,FUnitID.FName,FRealQty,FTaxPrice,FAllAmount,FSrcBillNo"
+  "lineFieldKeys": "FID,FBillNo,FDate,FCustomerID,FCustomerID.FName,FDocumentStatus,FCancelStatus,FEntryID,FMaterialId.FNumber,FMaterialId.FName,FUnitID.FName,FRealQty,FTaxPrice,FAllAmount,FSrcBillNo,FEntryNote",
+  "note": "lineFieldKeys 为分录字段集（字段名写错时程序会自动逐套降级重试）。M0 探针确认真实字段后修改本文件：数量/单价/金额候选 FRealQty|FQty、FTaxPrice|FPrice、FAllAmount|FAmount；源销售订单号候选 FSrcBillNo。customerPoField 填客户采购订单号的真实字段名（如自定义字段 F_PO_No），留空则该列为空、可手工补录。",
+  "customerPoField": ""
 }
