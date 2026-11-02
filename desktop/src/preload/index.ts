@@ -8,6 +8,10 @@ import type {
   CustomerOption,
   MappingApplyInput,
   MappingState,
+  NovaBindInput,
+  NovaBindResult,
+  NovaState,
+  NovaUploadResult,
   ProbeReport,
   LastSyncStat,
   StatementDTO,
@@ -37,6 +41,15 @@ const api = {
     return () => ipcRenderer.removeListener('sync:progress', listener)
   },
   listCustomers: (): Promise<CustomerOption[]> => ipcRenderer.invoke('customers:list'),
+  getNovaState: (): Promise<NovaState> => ipcRenderer.invoke('nova:state'),
+  bindNova: (input: NovaBindInput): Promise<NovaBindResult> => ipcRenderer.invoke('nova:bind', input),
+  unbindNova: (): Promise<NovaState> => ipcRenderer.invoke('nova:unbind'),
+  uploadToNova: (): Promise<NovaUploadResult> => ipcRenderer.invoke('nova:upload'),
+  onNovaUpload: (cb: (r: NovaUploadResult) => void) => {
+    const listener = (_: Electron.IpcRendererEvent, r: NovaUploadResult) => cb(r)
+    ipcRenderer.on('nova:upload', listener)
+    return () => ipcRenderer.removeListener('nova:upload', listener)
+  },
   previewStatement: (q: StatementPreviewQuery): Promise<StatementDTO> =>
     ipcRenderer.invoke('statement:preview', q),
   exportXlsx: (q: StatementPreviewQuery): Promise<{ path: string }> =>

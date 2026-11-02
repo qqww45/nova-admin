@@ -8,6 +8,8 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    BrandMark: typeof import('./../components/BrandMark.vue')['default']
+    EditableTable: typeof import('./../components/EditableTable/index.vue')['default']
     ElAlert: typeof import('element-plus/es')['ElAlert']
     ElAside: typeof import('element-plus/es')['ElAside']
     ElAvatar: typeof import('element-plus/es')['ElAvatar']
@@ -57,8 +59,13 @@ declare module 'vue' {
     ElTree: typeof import('element-plus/es')['ElTree']
     ElTreeSelect: typeof import('element-plus/es')['ElTreeSelect']
     ElUpload: typeof import('element-plus/es')['ElUpload']
+    IconSelect: typeof import('./../components/IconSelect/index.vue')['default']
+    ProTable: typeof import('./../components/ProTable/index.vue')['default']
+    ResetPasswordDialog: typeof import('./../components/ResetPasswordDialog/index.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
+    SlideVerify: typeof import('./../components/SlideVerify.vue')['default']
+    TableActionBar: typeof import('./../components/TableActionBar/index.vue')['default']
   }
   export interface GlobalDirectives {
     vLoading: typeof import('element-plus/es')['ElLoadingDirective']

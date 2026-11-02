@@ -4,6 +4,7 @@ import { getKingdee } from '../kingdee/client'
 import { buildLineCandidates } from '../kingdee/lineKeys'
 import { asRow, cellNumber, cellScalar, cellTypeName } from '../kingdee/cells'
 import { loadOutstockMapping } from '../mappingStore'
+import { serverLineFieldKeys } from '../nova/tasks'
 import { tryAcquire, release } from '../businessLock'
 import type { LastSyncStat, SyncEntity, SyncProgress, SyncStartInput } from '../../shared/types'
 
@@ -133,7 +134,8 @@ async function syncOutboundLines(
   const mapping = loadOutstockMapping()
   const poField = (mapping.customerPoField || '').trim()
 
-  const candidates = buildLineCandidates(mapping)
+  // 服务端配置作为候选之一（运维改字段不用发版），失败仍按后续候选降级
+  const candidates = buildLineCandidates(mapping, serverLineFieldKeys())
   const filter = sinceDate ? `FDate>='${sinceDate}'` : ''
   let lastErr: unknown = null
 
@@ -155,11 +157,11 @@ async function syncOutboundLines(
 
       const insert = db.prepare(`
         INSERT INTO outbound_line(
-          outbound_fid, material_number, material_name, unit,
-          qty_milli, price_cents, amount_cents, src_order_no, customer_po, remark
+          outbound_fid, entry_id, material_number, material_name, unit,
+          qty_milli, price_cents, amount_cents, src_order_no, customer_po, remark, sync_at
         ) VALUES(
-          @outbound_fid, @material_number, @material_name, @unit,
-          @qty_milli, @price_cents, @amount_cents, @src_order_no, @customer_po, @remark
+          @outbound_fid, @entry_id, @material_number, @material_name, @unit,
+          @qty_milli, @price_cents, @amount_cents, @src_order_no, @customer_po, @remark, @sync_at
         )
       `)
 
@@ -187,8 +189,11 @@ async function syncOutboundLines(
             const qty = idx('qty') >= 0 ? num(r[idx('qty')]) : 0
             const price = idx('price') >= 0 ? num(r[idx('price')]) : 0
             const amount = idx('amount') >= 0 ? num(r[idx('amount')]) : 0
+            const rawEntryId = idx('entryId') >= 0 ? num(r[idx('entryId')]) : 0
             insert.run({
               outbound_fid: outboundFid,
+              // 分录内码可能缺失：留空由服务端按「单据 + 行序号」生成稳定键
+              entry_id: rawEntryId > 0 ? rawEntryId : null,
               material_number: idx('matNo') >= 0 ? cellScalar(r[idx('matNo')]) : '',
               material_name: idx('matName') >= 0 ? cellScalar(r[idx('matName')]) : '',
               unit: idx('unit') >= 0 ? cellScalar(r[idx('unit')]) : '',
@@ -197,7 +202,8 @@ async function syncOutboundLines(
               amount_cents: Math.round(amount * 100),
               src_order_no: idx('srcNo') >= 0 ? cellScalar(r[idx('srcNo')]) : '',
               customer_po: idx('po') >= 0 ? cellScalar(r[idx('po')]) : '',
-              remark: idx('remark') >= 0 ? cellScalar(r[idx('remark')]) : ''
+              remark: idx('remark') >= 0 ? cellScalar(r[idx('remark')]) : '',
+              sync_at: nowIso()
             })
           }
         })

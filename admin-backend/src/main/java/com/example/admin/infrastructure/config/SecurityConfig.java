@@ -4,6 +4,8 @@ import com.example.admin.infrastructure.security.AccessDeniedHandlerImpl;
 import com.example.admin.infrastructure.security.AuthenticationEntryPointImpl;
 import com.example.admin.infrastructure.security.JwtAuthenticationFilter;
 import com.example.admin.infrastructure.security.JwtTokenProvider;
+import com.example.admin.infrastructure.security.KdTokenAuthenticationFilter;
+import com.example.admin.infrastructure.security.KdTokenService;
 import com.example.admin.infrastructure.security.TokenBlacklistService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -56,6 +58,9 @@ public class SecurityConfig {
             "/login/code",
             "/captcha",
             "/refresh",
+            // 采集器绑定：此时还没有机器令牌，凭"一次性绑定码"换取，
+            // 绑定码 5 分钟有效、一次一用、库里只存摘要，安全性由它保证
+            "/kd/binding/redeem",
             // Knife4j / OpenAPI 文档
             "/doc.html",
             "/webjars/**",
@@ -84,6 +89,9 @@ public class SecurityConfig {
     private final TokenBlacklistService tokenBlacklistService;
 
     private final UserDetailsService userDetailsService;
+
+    /** 采集器令牌校验（桌面端 X-Kd-Token） */
+    private final KdTokenService kdTokenService;
 
     /**
      * 密码加密器：BCrypt（自适应慢哈希，内置随机盐）。
@@ -120,6 +128,16 @@ public class SecurityConfig {
     }
 
     /**
+     * 采集器令牌过滤器（Bean 化，避免被 Servlet 容器重复注册）。
+     *
+     * @return 采集器过滤器
+     */
+    @Bean
+    public KdTokenAuthenticationFilter kdTokenAuthenticationFilter() {
+        return new KdTokenAuthenticationFilter(kdTokenService);
+    }
+
+    /**
      * 安全过滤链。
      *
      * @param http HttpSecurity
@@ -148,6 +166,9 @@ public class SecurityConfig {
                         .requestMatchers(WHITE_LIST).permitAll()
                         // 除白名单外的所有请求均需认证；细粒度权限由 @PreAuthorize 控制
                         .anyRequest().authenticated())
+                // 采集器过滤器先于 JWT：两者都只在自己认识的请求头存在时才建立上下文，
+                // 顺序只影响"同时带两种令牌"这种异常请求的判定优先级
+                .addFilterBefore(kdTokenAuthenticationFilter(), UsernamePasswordAuthenticationFilter.class)
                 // JWT 过滤器必须在 UsernamePasswordAuthenticationFilter 之前，才能提前建立安全上下文
                 .addFilterBefore(jwtAuthenticationFilter(), UsernamePasswordAuthenticationFilter.class)
                 // 安全响应头：逐条说明为什么需要

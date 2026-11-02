@@ -2,6 +2,8 @@ import { app, BrowserWindow, shell } from 'electron'
 import { join } from 'path'
 import { registerIpc } from './ipc'
 import { initUpdater, checkForUpdatesSilent } from './updater'
+import { startCommandLoop, stopCommandLoop } from './nova/commands'
+import { refreshTasks } from './nova/tasks'
 import { closeDb } from './db'
 import { getUserRoots } from './paths'
 
@@ -53,6 +55,10 @@ app.whenReady().then(() => {
   registerIpc()
   initUpdater()
   createWindow()
+  // 已绑定时开始拉指令（内部自检令牌，未绑定则空转）
+  startCommandLoop()
+  // 启动即拉一次任务清单：字段集配置可能已被运维改过
+  void refreshTasks()
 
   setTimeout(() => {
     if (app.isPackaged) void checkForUpdatesSilent()
@@ -66,4 +72,9 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   closeDb()
   if (process.platform !== 'darwin') app.quit()
+})
+
+// 退出前停掉轮询，避免定时器在 app 销毁后继续发请求
+app.on('before-quit', () => {
+  stopCommandLoop()
 })

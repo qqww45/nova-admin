@@ -1,5 +1,8 @@
-import { ipcMain, shell } from 'electron'
+import { BrowserWindow, ipcMain, shell } from 'electron'
 import { getPublicConfig, saveConfig } from './configStore'
+import { bindNova, novaState, unbindNova, uploadToNova } from './nova/uploader'
+import { clearTaskCache, refreshTasks } from './nova/tasks'
+import { startCommandLoop, stopCommandLoop } from './nova/commands'
 import { getKingdee } from './kingdee/client'
 import { detectKingdeeEnv } from './kingdee/envDetect'
 import { runM0Probe } from './kingdee/probe'
@@ -23,6 +26,8 @@ import {
 import type {
   AppConfigSaveInput,
   MappingApplyInput,
+  NovaBindInput,
+  NovaUploadResult,
   ProbeReport,
   StatementPreviewQuery,
   SyncStartInput
@@ -82,9 +87,36 @@ export function registerIpc() {
     return { mapping: loadOutstockMapping(), path: userMappingPath(), userOverride: false }
   })
 
-  ipcMain.handle('sync:run', async (_e, input: SyncStartInput) => runSync(input))
+  ipcMain.handle('sync:run', async (_e, input: SyncStartInput) => {
+    const results = await runSync(input)
+    // 本地同步成功后再上行；不 await，避免业务员拿对账单前先等一遍网络
+    void autoUpload()
+    return results
+  })
   ipcMain.handle('sync:lastStats', () => lastSyncStats())
   ipcMain.handle('customers:list', () => listCustomers())
+
+  // 上行同步（nova 对账平台）：渲染进程拿不到令牌原文，只能看状态
+  ipcMain.handle('nova:state', () => novaState())
+  ipcMain.handle('nova:bind', async (_e, input: NovaBindInput) => {
+    const result = await bindNova(input)
+    if (result.ok) {
+      // 绑定后立刻拉一次任务清单并开始轮询指令，业务员不用重启客户端
+      void refreshTasks(true)
+      startCommandLoop()
+    }
+    return result
+  })
+  ipcMain.handle('nova:unbind', () => {
+    stopCommandLoop()
+    clearTaskCache()
+    return unbindNova()
+  })
+  ipcMain.handle('nova:upload', async (): Promise<NovaUploadResult> => {
+    const result = await uploadToNova()
+    broadcastNova(result)
+    return result
+  })
 
   ipcMain.handle('statement:preview', (_e, q: StatementPreviewQuery) =>
     buildStatement(q.customerFid, q.fromMonth, q.toMonth)
@@ -105,4 +137,24 @@ export function registerIpc() {
   ipcMain.handle('updater:install', () => {
     quitAndInstall()
   })
+}
+
+/** 上行结果广播到所有窗口（同步页据此刷新状态） */
+function broadcastNova(result: NovaUploadResult) {
+  for (const win of BrowserWindow.getAllWindows()) {
+    win.webContents.send('nova:upload', result)
+  }
+}
+
+/** 同步结束后自动上行：失败只记录，不打扰业务员 */
+async function autoUpload() {
+  try {
+    broadcastNova(await uploadToNova())
+  } catch (e) {
+    broadcastNova({
+      ok: false,
+      status: 'failed',
+      message: e instanceof Error ? e.message : String(e)
+    })
+  }
 }

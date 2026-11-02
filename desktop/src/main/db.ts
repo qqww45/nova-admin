@@ -5,7 +5,7 @@ import { getUserRoots } from './paths'
 
 let db: Database.Database | null = null
 
-const SCHEMA_VERSION = 1
+const SCHEMA_VERSION = 2
 
 export function getDb(): Database.Database {
   if (db) return db
@@ -138,6 +138,20 @@ function migrate(database: Database.Database) {
         `INSERT INTO meta(key, value) VALUES('schema_version', ?)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value`
       )
+      .run(String(SCHEMA_VERSION))
+  }
+
+  // v2：为上行同步补字段。
+  //   entry_id —— 金蝶分录内码，作为服务端幂等键（取不到时由上行侧按单据+行序号生成）
+  //   sync_at  —— 本行写入本地库的时间，用于"只上报上次之后变化的行"
+  if (current < 2) {
+    const cols = database.prepare(`PRAGMA table_info(outbound_line)`).all() as Array<{ name: string }>
+    const has = (name: string) => cols.some((c) => c.name === name)
+    if (!has('entry_id')) database.exec(`ALTER TABLE outbound_line ADD COLUMN entry_id INTEGER`)
+    if (!has('sync_at')) database.exec(`ALTER TABLE outbound_line ADD COLUMN sync_at TEXT`)
+    database.exec(`CREATE INDEX IF NOT EXISTS idx_outbound_line_sync ON outbound_line(sync_at)`)
+    database
+      .prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`)
       .run(String(SCHEMA_VERSION))
   }
 }

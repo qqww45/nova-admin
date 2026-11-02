@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import PageHeader from '../components/ui/PageHeader.vue'
 import HzField from '../components/ui/HzField.vue'
 import HzButton from '../components/ui/HzButton.vue'
-import type { LastSyncStat, SyncProgress } from '../../../shared/types'
+import type { LastSyncStat, NovaState, SyncProgress } from '../../../shared/types'
 
 const router = useRouter()
 const sinceDate = ref(localStorage.getItem('hz.sinceDate') || '2025-01-01')
@@ -16,6 +16,8 @@ const items = ref<SyncProgress[]>([
 ])
 const error = ref('')
 const lastStats = ref<LastSyncStat[]>([])
+const nova = ref<NovaState | null>(null)
+const uploading = ref(false)
 
 const labels: Record<string, string> = {
   customer: '客户',
@@ -40,6 +42,29 @@ const neverSynced = computed(
 )
 
 let off: (() => void) | undefined
+let offNova: (() => void) | undefined
+
+async function refreshNova() {
+  try {
+    nova.value = await window.hengzhang.getNovaState()
+  } catch {
+    /* ignore */
+  }
+}
+
+/** 手动触发一次上行（同步结束后也会自动跑一次） */
+async function uploadNow() {
+  uploading.value = true
+  try {
+    const r = await window.hengzhang.uploadToNova()
+    error.value = r.ok ? '' : `上行失败：${r.message}`
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    uploading.value = false
+    await refreshNova()
+  }
+}
 
 onMounted(async () => {
   off = window.hengzhang.onSyncProgress((p) => {
@@ -47,6 +72,9 @@ onMounted(async () => {
     if (idx >= 0) items.value[idx] = p
     else items.value.push(p)
   })
+  // 自动上行完成后刷新"待上报 / 上次结果"
+  offNova = window.hengzhang.onNovaUpload(() => void refreshNova())
+  await refreshNova()
 
   // 进入页面先恢复上次同步结果，而不是显示 0
   try {
@@ -70,7 +98,10 @@ onMounted(async () => {
   }
 })
 
-onUnmounted(() => off?.())
+onUnmounted(() => {
+  off?.()
+  offNova?.()
+})
 
 async function start() {
   running.value = true
@@ -121,6 +152,34 @@ function statusLabel(s: SyncProgress['status']) {
           {{ labels[s.entity] || s.entity }} {{ s.rowCount }}
         </span>
       </template>
+    </div>
+
+    <div class="nova-bar panel rise">
+      <div class="nova-main">
+        <b>对账平台</b>
+        <template v-if="nova?.bound">
+          <span>已绑定 {{ nova.acctName || nova.acctId }}</span>
+          <span class="sep">·</span>
+          <span>待上报 {{ nova.pendingRows ?? 0 }} 行</span>
+        </template>
+        <template v-else>
+          <span class="muted">未绑定</span>
+          <button class="link" :disabled="running" @click="router.push('/connect')">去绑定</button>
+        </template>
+      </div>
+      <div class="nova-side">
+        <span v-if="nova?.lastUploadResult" class="muted small">
+          {{ nova.lastUploadAt }} · {{ nova.lastUploadResult }}
+        </span>
+        <HzButton
+          variant="ghost"
+          :disabled="!nova?.bound || running"
+          :loading="uploading"
+          @click="uploadNow"
+        >
+          立即上报
+        </HzButton>
+      </div>
     </div>
 
     <div class="toolbar panel rise">
@@ -209,6 +268,58 @@ function statusLabel(s: SyncProgress['status']) {
 
 .last-banner .stat {
   color: var(--text);
+}
+
+.nova-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  margin-bottom: 14px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.nova-main {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.nova-main b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.nova-side {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.nova-bar .sep {
+  color: var(--text-faint);
+}
+
+.nova-bar .small {
+  font-size: 12px;
+}
+
+.nova-bar .muted {
+  color: var(--text-muted);
+}
+
+.nova-bar .link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent-2);
+  cursor: pointer;
+  font-size: 13px;
 }
 
 .note {

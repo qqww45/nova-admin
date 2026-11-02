@@ -5,7 +5,7 @@ import PageHeader from '../components/ui/PageHeader.vue'
 import HzField from '../components/ui/HzField.vue'
 import HzButton from '../components/ui/HzButton.vue'
 import HzSelect from '../components/ui/HzSelect.vue'
-import type { DataCenterOption, MappingState, ProbeReport } from '../../../shared/types'
+import type { DataCenterOption, MappingState, NovaState, ProbeReport } from '../../../shared/types'
 
 const router = useRouter()
 const saving = ref(false)
@@ -19,6 +19,12 @@ const centers = ref<DataCenterOption[]>([])
 const toast = ref<{ type: 'ok' | 'err'; text: string } | null>(null)
 const hasPassword = ref(false)
 const savedAcctName = ref('')
+
+/** 对账平台（nova）绑定状态：令牌只在主进程，本页只拿得到状态 */
+const nova = ref<NovaState | null>(null)
+const novaBaseUrl = ref('')
+const novaCode = ref('')
+const novaBinding = ref(false)
 
 const form = reactive({
   serverUrl: '',
@@ -72,7 +78,44 @@ onMounted(async () => {
   } catch {
     /* ignore */
   }
+
+  try {
+    nova.value = await window.hengzhang.getNovaState()
+    novaBaseUrl.value = nova.value.baseUrl
+  } catch {
+    /* ignore */
+  }
 })
+
+/** 用 nova 页面生成的绑定码换取机器令牌并落盘 */
+async function bindNovaAccount() {
+  novaBinding.value = true
+  toast.value = null
+  try {
+    const res = await window.hengzhang.bindNova({
+      baseUrl: novaBaseUrl.value.trim(),
+      code: novaCode.value.trim()
+    })
+    nova.value = res.state
+    novaBaseUrl.value = res.state.baseUrl
+    if (res.ok) novaCode.value = ''
+    toast.value = { type: res.ok ? 'ok' : 'err', text: res.message }
+  } catch (e) {
+    toast.value = { type: 'err', text: e instanceof Error ? e.message : String(e) }
+  } finally {
+    novaBinding.value = false
+  }
+}
+
+/** 解除本机绑定（服务端令牌请在网页上吊销） */
+async function unbindNovaAccount() {
+  try {
+    nova.value = await window.hengzhang.unbindNova()
+    toast.value = { type: 'ok', text: '已解除本机绑定，可在网页「绑定管理」吊销令牌' }
+  } catch (e) {
+    toast.value = { type: 'err', text: e instanceof Error ? e.message : String(e) }
+  }
+}
 
 async function detect() {
   detecting.value = true
@@ -311,6 +354,41 @@ async function resetMapping() {
       </div>
     </div>
 
+    <div class="panel nova-panel rise">
+      <div class="panel-title">对账平台（nova）绑定</div>
+      <div class="fields">
+        <div class="two">
+          <HzField label="平台地址" hint="默认生产后端；私有部署时改这里">
+            <input v-model="novaBaseUrl" :disabled="nova?.bound" placeholder="https://" spellcheck="false" />
+          </HzField>
+          <HzField label="绑定码" hint="在 nova「金蝶同步 → 绑定管理」生成，5 分钟有效、仅一次">
+            <input
+              v-model="novaCode"
+              :disabled="nova?.bound"
+              placeholder="8 位绑定码"
+              maxlength="12"
+              spellcheck="false"
+            />
+          </HzField>
+        </div>
+        <div class="nova-row">
+          <span class="tag" :class="nova?.bound ? 'ok' : 'err'">
+            {{ nova?.bound ? '已绑定' : '未绑定' }}
+          </span>
+          <span v-if="nova?.bound" class="muted">
+            账套 {{ nova.acctName || nova.acctId }} · 待上报 {{ nova.pendingRows ?? 0 }} 行{{
+              nova.lastUploadAt ? ` · 上次上报 ${nova.lastUploadAt}` : ''
+            }}
+          </span>
+          <span v-else class="muted">未绑定不影响本地对账导出，绑定后每次同步会自动上报到对账平台</span>
+          <span class="nova-actions">
+            <HzButton v-if="!nova?.bound" :loading="novaBinding" @click="bindNovaAccount">绑定</HzButton>
+            <HzButton v-else variant="ghost" @click="unbindNovaAccount">解除本机绑定</HzButton>
+          </span>
+        </div>
+      </div>
+    </div>
+
     <div v-if="toast" class="toast" :class="toast.type">{{ toast.text }}</div>
 
     <div v-if="report" class="probe rise">
@@ -539,6 +617,38 @@ async function resetMapping() {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
+}
+
+.nova-panel {
+  margin-top: 16px;
+}
+
+.nova-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+
+.nova-row .nova-actions {
+  margin-left: auto;
+}
+
+.nova-row .muted {
+  color: var(--text-muted);
+}
+
+.nova-row .tag.ok {
+  background: rgba(61, 220, 151, 0.12);
+  border-color: rgba(61, 220, 151, 0.3);
+  color: #b6f5d4;
+}
+
+.nova-row .tag.err {
+  background: rgba(255, 107, 122, 0.12);
+  border-color: rgba(255, 107, 122, 0.32);
+  color: #ffc2c9;
 }
 
 .toast {

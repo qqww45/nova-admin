@@ -253,3 +253,50 @@ export interface AppInfo {
   productName: string
   userDataPath: string
 }
+
+/* ---------------- nova 服务器（对账平台）上行同步 ---------------- */
+
+/** 上行状态（不含令牌原文） */
+export interface NovaState {
+  /** 对账平台地址，如 https://nova-api.s.ci64.com */
+  baseUrl: string
+  /** 是否已绑定（拿到机器令牌） */
+  bound: boolean
+  bindingId?: string
+  userId?: string
+  acctId?: string
+  acctName?: string
+  /** 上次成功上报时间 */
+  lastUploadAt?: string
+  /** 上次上报结果摘要 */
+  lastUploadResult?: string
+  /** 本地上行水位（只有该时间之后变化的行才会被上报） */
+  uploadWatermark?: string
+  /** 待上报行数（客户 + 出库单 + 分录） */
+  pendingRows?: number
+}
+
+export interface NovaBindInput {
+  /** 对账平台地址；留空沿用已保存值 */
+  baseUrl: string
+  /** nova 页面生成的 8 位绑定码 */
+  code: string
+}
+
+export interface NovaBindResult {
+  ok: boolean
+  message: string
+  state: NovaState
+}
+
+export type NovaUploadStatus = 'unbound' | 'noop' | 'success' | 'failed'
+
+export interface NovaUploadResult {
+  ok: boolean
+  status: NovaUploadStatus
+  message: string
+  received?: number
+  upserted?: number
+  skipped?: number
+  finishedAt?: string
+}

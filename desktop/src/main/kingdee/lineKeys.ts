@@ -83,11 +83,21 @@ export const LINE_KEY_CANDIDATES = [
   [OUT_BASE, 'FEntity_FEntryID', OUT_MAT, 'FRealQty,FTaxPrice,FAllAmount'].join(',')
 ]
 
-/** 按优先级生成待试字段集：本机映射 → 草稿 → 内置候选；并补上客户采购订单号字段 */
-export function buildLineCandidates(mapping: OutstockMapping): string[] {
+/**
+ * 按优先级生成待试字段集：本机自检结果 → 服务端配置 → 草稿 → 内置候选；并补上客户采购订单号字段。
+ *
+ * <p>本机自检结果优先于服务端配置：那是"这台机器 + 这个账套"实测通过的字段集，
+ * 服务端配置是运维在网页上填的，可能只是别的账套的复制品。
+ *
+ * @param mapping 本机映射
+ * @param serverKeys 服务端任务清单里的字段集（可选）
+ * @returns 候选字段集，按优先级
+ */
+export function buildLineCandidates(mapping: OutstockMapping, serverKeys?: string): string[] {
   const poField = (mapping.customerPoField || '').trim()
   const candidates: string[] = []
-  for (const raw of [mapping.lineFieldKeys, mapping.lineFieldKeysDraft, ...LINE_KEY_CANDIDATES]) {
+  const pool = [mapping.lineFieldKeys, serverKeys, mapping.lineFieldKeysDraft, ...LINE_KEY_CANDIDATES]
+  for (const raw of pool) {
     let keys = (raw || '').trim()
     if (!keys) continue
     if (poField && !keys.split(',').map((t) => t.trim()).includes(poField)) {
