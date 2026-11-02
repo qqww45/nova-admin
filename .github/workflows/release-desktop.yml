@@ -1,19 +1,24 @@
-name: Release
+name: Release Desktop
 
-# 推送 v* 标签，或在 Actions 页手动运行。
-# 标签必须等于 package.json 的版本，例如版本 1.0.0 对应标签 v1.0.0。
+# 桌面端发版：推送 desktop-v* 标签触发（注意与后端/前端的部署流互不影响）。
+# 标签必须等于 desktop/package.json 的版本，例如版本 1.2.0 对应标签 desktop-v1.2.0。
+# 产物上传到本仓库 Releases，客户端 electron-updater 据此自动更新。
 on:
   push:
     tags:
-      - "v*"
+      - "desktop-v*"
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-desktop-${{ github.ref }}
   cancel-in-progress: false
+
+defaults:
+  run:
+    working-directory: desktop
 
 jobs:
   windows:
@@ -28,6 +33,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: desktop/package-lock.json
 
       - name: Tag matches package version
         if: startsWith(github.ref, 'refs/tags/')
@@ -35,8 +41,9 @@ jobs:
         run: |
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
           $tag = "${{ github.ref_name }}"
-          if ($tag -ne "v$version") {
-            Write-Error "标签 $tag 与 package.json 版本 v$version 不一致。先改版本号、提交，再打同名标签。"
+          $expected = "desktop-v$version"
+          if ($tag -ne $expected) {
+            Write-Error "标签 $tag 与 desktop/package.json 版本不一致，应为 $expected。先改版本号、提交，再打同名标签。"
             exit 1
           }
 

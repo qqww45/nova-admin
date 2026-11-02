@@ -53,6 +53,12 @@ admin-frontend/
     store/        Pinia（user / app / permission）
     utils/        request（401 无感刷新）、auth、device
 
+desktop/         桌面采集器（Electron + Vue3，从金蝶同步数据上报本系统）
+  src/main/      主进程：金蝶 WebAPI 客户端、同步、SQLite、导出、自动更新
+  src/renderer/  渲染进程：连接/同步/对账页面
+  src/shared/    主渲染共享类型
+  resources/     字段映射等内置资源
+
 docs/
   00-方案确认.md      原始需求
   登录方案.md         双 Token 与设备信任设计
@@ -332,7 +338,21 @@ admin:
 
 ---
 
-## 8. 已知边界
+## 8. 桌面端（desktop）
+
+安装在业务员电脑上的采集器，负责从金蝶 K3 Cloud 增量拉取该业务员权限范围内的数据，上报到本系统；对账单等业务功能后续迁移到后台（见 `docs/金蝶对账同步方案.md`）。
+
+```bash
+cd desktop
+npm ci
+npm run dev          # 开发
+npm run build        # 构建（主进程/渲染进程）
+npm run dist:cn      # 本地打 Windows 安装包（走国内镜像）
+```
+
+发版：推送 `desktop-v*` 标签（等于 `desktop/package.json` 版本）触发 `.github/workflows/release-desktop.yml`，产物发布到本仓库 Releases，客户端自动更新读取 `build.publish`（`qqww45/nova-admin`）。
+
+## 9. 已知边界
 
 - **票据 / 刷新令牌 / 在线会话 / 可信设备 / 登录风控计数** 5 个状态组件：默认 `InMemory*` 实现（单进程，开箱即用），
   Redis 实现已就绪（`infrastructure/cache/redis/*`）—— 切到 `admin.cache.type=redis` 即可启用，
