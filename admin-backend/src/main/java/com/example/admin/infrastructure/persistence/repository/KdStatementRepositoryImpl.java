@@ -2,12 +2,15 @@ package com.example.admin.infrastructure.persistence.repository;
 
 import cn.hutool.core.collection.ListUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.example.admin.domain.model.kd.KdCustomer;
 import com.example.admin.domain.model.kd.KdOutbound;
 import com.example.admin.domain.model.kd.KdOutboundLine;
 import com.example.admin.domain.repository.KdStatementRepository;
 import com.example.admin.infrastructure.persistence.converter.KdConverter;
+import com.example.admin.infrastructure.persistence.mapper.KdCustomerMapper;
 import com.example.admin.infrastructure.persistence.mapper.KdOutboundLineMapper;
 import com.example.admin.infrastructure.persistence.mapper.KdOutboundMapper;
+import com.example.admin.infrastructure.persistence.po.KdCustomerPo;
 import com.example.admin.infrastructure.persistence.po.KdOutboundLinePo;
 import com.example.admin.infrastructure.persistence.po.KdOutboundPo;
 import lombok.RequiredArgsConstructor;
@@ -34,6 +37,7 @@ public class KdStatementRepositoryImpl implements KdStatementRepository {
 
     private final KdOutboundMapper outboundMapper;
     private final KdOutboundLineMapper lineMapper;
+    private final KdCustomerMapper customerMapper;
     private final KdConverter converter;
 
     @Override
@@ -78,5 +82,19 @@ public class KdStatementRepositoryImpl implements KdStatementRepository {
             }
         }
         return result;
+    }
+
+    @Override
+    public KdCustomer findCustomer(Long ownerUserId, String acctId, Long customerFid) {
+        if (customerFid == null) {
+            return null;
+        }
+        KdCustomerPo po = customerMapper.selectOne(new LambdaQueryWrapper<KdCustomerPo>()
+                .eq(ownerUserId != null, KdCustomerPo::getOwnerUserId, ownerUserId)
+                .eq(acctId != null && !acctId.isBlank(), KdCustomerPo::getAcctId, acctId)
+                .eq(KdCustomerPo::getKdFid, customerFid)
+                .orderByDesc(KdCustomerPo::getSyncAt)
+                .last("LIMIT 1"));
+        return po == null ? null : converter.customerToDomain(po);
     }
 }

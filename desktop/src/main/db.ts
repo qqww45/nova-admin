@@ -5,7 +5,7 @@ import { getUserRoots } from './paths'
 
 let db: Database.Database | null = null
 
-const SCHEMA_VERSION = 2
+const SCHEMA_VERSION = 3
 
 export function getDb(): Database.Database {
   if (db) return db
@@ -150,6 +150,17 @@ function migrate(database: Database.Database) {
     if (!has('entry_id')) database.exec(`ALTER TABLE outbound_line ADD COLUMN entry_id INTEGER`)
     if (!has('sync_at')) database.exec(`ALTER TABLE outbound_line ADD COLUMN sync_at TEXT`)
     database.exec(`CREATE INDEX IF NOT EXISTS idx_outbound_line_sync ON outbound_line(sync_at)`)
+    database
+      .prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`)
+      .run(String(SCHEMA_VERSION))
+  }
+
+  // v3：补「规格」列。对账单（金样板）明细的规格列需要 FMaterialId.FSpecification，
+  // 此前整条链路都没有采集，导出的规格永远为空。
+  if (current < 3) {
+    const cols = database.prepare(`PRAGMA table_info(outbound_line)`).all() as Array<{ name: string }>
+    const has = (name: string) => cols.some((c) => c.name === name)
+    if (!has('spec')) database.exec(`ALTER TABLE outbound_line ADD COLUMN spec TEXT`)
     database
       .prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`)
       .run(String(SCHEMA_VERSION))

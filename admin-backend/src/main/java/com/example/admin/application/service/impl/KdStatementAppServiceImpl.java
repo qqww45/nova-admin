@@ -1,17 +1,23 @@
 package com.example.admin.application.service.impl;
 
 import com.example.admin.application.service.KdStatementAppService;
+import com.example.admin.application.service.KdStatementExport;
 import com.example.admin.common.constant.Constants;
 import com.example.admin.common.exception.BusinessException;
 import com.example.admin.common.result.PageResult;
 import com.example.admin.common.result.ResultCode;
 import com.example.admin.common.util.IdParser;
 import com.example.admin.domain.model.auth.LoginUser;
+import com.example.admin.domain.model.common.IdName;
+import com.example.admin.domain.model.config.ConfigItem;
+import com.example.admin.domain.model.kd.KdCustomer;
 import com.example.admin.domain.model.kd.KdOutbound;
 import com.example.admin.domain.model.kd.KdOutboundLine;
 import com.example.admin.domain.port.OperatorContext;
+import com.example.admin.domain.repository.BizUserRepository;
+import com.example.admin.domain.repository.ConfigRepository;
 import com.example.admin.domain.repository.KdStatementRepository;
-import com.example.admin.infrastructure.excel.XlsxWriter;
+import com.example.admin.infrastructure.excel.StatementXlsxWriter;
 import com.example.admin.interfaces.dto.req.KdStatementQuery;
 import com.example.admin.interfaces.dto.resp.KdStatementBillResp;
 import com.example.admin.interfaces.dto.resp.KdStatementDetailResp;
@@ -31,7 +37,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
+import java.util.stream.Collectors;
 
 /**
  * 对账单应用服务实现。
@@ -41,7 +47,9 @@ import java.util.Objects;
  *     <li>只统计有效出库单（未作废、未被全量差集标失效）；</li>
  *     <li>金额以分录汇总为准，表头金额仅用于没有分录的兜底单据；</li>
  *     <li>按 {@code 客户 + 账套} 聚合：金蝶内码只在账套内唯一，跨账套合并会同名串号；</li>
- *     <li>默认窗口最近 90 天、单次最多 366 天，防止误操作全表扫描。</li>
+ *     <li>默认窗口最近 90 天、单次最多 366 天，防止误操作全表扫描；</li>
+ *     <li>导出版式复刻金样板（见 {@link StatementXlsxWriter}）：客户 × 物料一个 sheet，
+ *         金额列为「数量 × 单价」公式、页脚为 SUM 合计，与模板口径一致。</li>
  * </ul>
  *
  * @author admin-system
@@ -57,12 +65,27 @@ public class KdStatementAppServiceImpl implements KdStatementAppService {
     /** 单次查询允许的最大窗口（天） */
     private static final int MAX_WINDOW_DAYS = 366;
 
-    /** 导出明细分录上限（与既有导出保持一致，避免一次导出打爆内存） */
+    /**
+     * 导出明细行上限。超出时直接报错而不是截断：对账单是给客户签字的文件，
+     * 静默截断会让导出文件与页面 / 客户汇总对不上，必须让业务员主动缩小范围。
+     */
     private static final int EXPORT_MAX_LINES = 5000;
 
     private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd");
 
+    /* 对账单抬头取系统配置，未配置时退回金样板文本 */
+    private static final String CFG_COMPANY_NAME = "kd.statement.company.name";
+    private static final String CFG_COMPANY_NAME_EN = "kd.statement.company.name-en";
+    private static final String CFG_COMPANY_INFO = "kd.statement.company.info";
+    private static final String DEFAULT_COMPANY_NAME = "深圳市一恒科电子科技有限公司";
+    private static final String DEFAULT_COMPANY_NAME_EN = "SHENZHEN YIHENGK ELECTRONICS TECHNOLOGYCO.,LTD";
+    private static final String DEFAULT_COMPANY_INFO =
+            "地址：广东省深圳市南山区留仙大道创智云城A3栋A座8-9楼（成谷研发大厦）"
+                    + "   电话：0755-26905055     传真：0755-26905050";
+
     private final KdStatementRepository statementRepository;
+    private final ConfigRepository configRepository;
+    private final BizUserRepository bizUserRepository;
     private final OperatorContext operatorContext;
 
     /**
@@ -149,6 +172,14 @@ public class KdStatementAppServiceImpl implements KdStatementAppService {
         }
         List<KdOutbound> bills = statementRepository.listBills(
                 scope.ownerUserId(), scope.acctId(), scope.from(), scope.toExclusive(), customerFid);
+        // 金蝶客户内码只在账套内唯一：不指定账套时同一内码可能命中两个账套的两个不同客户，
+        // 直接合并会让明细串户（金额对不上也查不出原因），必须显式拒绝
+        long acctCount = bills.stream().map(KdOutbound::getAcctId)
+                .filter(a -> a != null && !a.isBlank()).distinct().count();
+        if (acctCount > 1) {
+            throw new BusinessException(ResultCode.PARAM_ERROR,
+                    "该客户内码在多个账套都有数据，请先指定账套（acctId）后重试");
+        }
         List<KdOutboundLine> lines = statementRepository.listLines(scope.ownerUserId(), bills);
 
         KdStatementDetailResp resp = new KdStatementDetailResp();
@@ -172,103 +203,203 @@ public class KdStatementAppServiceImpl implements KdStatementAppService {
     }
 
     @Override
-    public byte[] export(KdStatementQuery query) {
+    public KdStatementExport export(KdStatementQuery query) {
         Scope scope = scope(query);
         Long customerFid = IdParser.parseIdOrNull(query.getCustomerFid());
         List<KdOutbound> bills = statementRepository.listBills(
                 scope.ownerUserId(), scope.acctId(), scope.from(), scope.toExclusive(), customerFid);
+        if (bills.isEmpty()) {
+            throw new BusinessException(ResultCode.DATA_NOT_FOUND,
+                    "所选范围内没有可对账的出库数据，请调整客户或日期区间后重试");
+        }
         List<KdOutboundLine> lines = statementRepository.listLines(scope.ownerUserId(), bills);
-        List<KdStatementBillResp> detailBills = buildBills(bills, lines);
+        Map<String, List<KdOutboundLine>> linesByBill = new LinkedHashMap<>();
+        for (KdOutboundLine line : lines) {
+            linesByBill.computeIfAbsent(billKey(line.getAcctId(), line.getOutboundFid()),
+                    k -> new ArrayList<>()).add(line);
+        }
 
-        // 汇总按「账套 + 客户」聚合，导出时不受分页限制；
-        // 金额取明细金额（分录口径），与页面上看到的一致
-        Map<String, BigDecimal> amountByKey = new LinkedHashMap<>();
-        Map<String, Integer> countByKey = new LinkedHashMap<>();
-        Map<String, String> nameByKey = new LinkedHashMap<>();
-        Map<String, String> acctByKey = new LinkedHashMap<>();
-        for (int i = 0; i < bills.size(); i++) {
-            KdOutbound bill = bills.get(i);
+        // 1) 组装「客户 × 物料」分组（顺序 = 单据日期序，组内再按物料首现顺序拆 sheet）
+        Map<String, CustomerGroup> groups = new LinkedHashMap<>();
+        int rowCount = 0;
+        for (KdOutbound bill : bills) {
             String key = keyOf(bill.getAcctId(), bill.getCustomerFid());
-            countByKey.merge(key, 1, Integer::sum);
-            amountByKey.merge(key, detailBills.get(i).getAmount(), BigDecimal::add);
-            nameByKey.putIfAbsent(key, bill.getCustomerName());
-            acctByKey.putIfAbsent(key, bill.getAcctId());
-        }
-
-        List<String> summaryHeader = List.of("账套", "客户名称", "单据数", "金额合计");
-        List<List<String>> summaryRows = new ArrayList<>();
-        for (Map.Entry<String, Integer> entry : countByKey.entrySet()) {
-            summaryRows.add(List.of(
-                    nullToEmpty(acctByKey.get(entry.getKey())),
-                    nullToEmpty(nameByKey.get(entry.getKey())),
-                    String.valueOf(entry.getValue()),
-                    money(amountByKey.get(entry.getKey()))));
-        }
-        summaryRows.add(List.of("合计", "", String.valueOf(bills.size()),
-                money(sumAmount(amountByKey, countByKey.keySet()))));
-
-        List<String> detailHeader = List.of("客户名称", "出库单号", "业务日期", "物料编码", "物料名称",
-                "规格型号", "单位", "数量", "单价", "金额", "源单编号", "客户PO", "备注");
-        List<List<String>> detailRows = new ArrayList<>();
-        // 先数清本期分录总数（截断后仍要知道"一共多少行"，不能边截断边数）
-        int totalLines = 0;
-        for (KdStatementBillResp bill : detailBills) {
-            totalLines += bill.getLines().size();
-        }
-        boolean truncated = false;
-        outer:
-        for (KdStatementBillResp bill : detailBills) {
-            for (KdStatementLineResp line : bill.getLines()) {
-                if (detailRows.size() >= EXPORT_MAX_LINES) {
-                    // 对账单是给业务员和客户核数的依据，静默截断会让"导出文件"
-                    // 与"页面 / 客户汇总"对不上且无人察觉；这里显式标记截断
-                    truncated = true;
-                    break outer;
+            CustomerGroup group = groups.computeIfAbsent(key,
+                    k -> new CustomerGroup(bill.getAcctId(), bill.getCustomerFid()));
+            if (group.customerName == null || group.customerName.isBlank()) {
+                group.customerName = bill.getCustomerName();
+            }
+            group.ownerUserId = bill.getOwnerUserId();
+            List<KdOutboundLine> billLines = linesByBill.getOrDefault(
+                    billKey(bill.getAcctId(), bill.getKdFid()), List.of());
+            if (billLines.isEmpty()) {
+                // 无分录单据（权限只拉到表头）：退回表头金额并标注，不能不进对账
+                group.rows.add(new StatementXlsxWriter.Row(
+                        bill.getBizDate() == null ? null : bill.getBizDate().toLocalDate(),
+                        bill.getBillNo(), null, null, null, null, null,
+                        null, null, cents(bill.getAmountCents()), "（该单无分录数据）"));
+                rowCount++;
+            } else {
+                for (KdOutboundLine line : billLines) {
+                    BigDecimal amount = cents(line.getAmountCents());
+                    BigDecimal qty = line.getQtyMilli() == null ? null
+                            : BigDecimal.valueOf(line.getQtyMilli(), 3);
+                    group.rows.add(new StatementXlsxWriter.Row(
+                            bill.getBizDate() == null ? null : bill.getBizDate().toLocalDate(),
+                            bill.getBillNo(), line.getCustomerPo(),
+                            line.getMaterialNumber(), line.getMaterialName(), line.getSpec(),
+                            line.getUnit(), qty,
+                            priceOf(line, amount, qty), null, line.getRemark()));
+                    rowCount++;
                 }
-                detailRows.add(List.of(
-                        nullToEmpty(bill.getCustomerName()),
-                        nullToEmpty(bill.getBillNo()),
-                        nullToEmpty(bill.getBizDate()),
-                        nullToEmpty(line.getMaterialNumber()),
-                        nullToEmpty(line.getMaterialName()),
-                        nullToEmpty(line.getSpec()),
-                        nullToEmpty(line.getUnit()),
-                        qty(line.getQty()),
-                        money(line.getPrice()),
-                        money(line.getAmount()),
-                        nullToEmpty(line.getSrcOrderNo()),
-                        nullToEmpty(line.getCustomerPo()),
-                        nullToEmpty(line.getRemark())));
             }
-        }
-        if (detailRows.isEmpty()) {
-            // 没有分录时导出单据级明细，避免"导出空表"
-            for (KdStatementBillResp bill : detailBills) {
-                detailRows.add(List.of(nullToEmpty(bill.getCustomerName()), nullToEmpty(bill.getBillNo()),
-                        nullToEmpty(bill.getBizDate()), "", "", "", "", "", "",
-                        money(bill.getAmount()), "", "", "（该单无分录数据）"));
-            }
-        } else if (truncated) {
-            // 截断标记同时写进两个 sheet：客户汇总是完整口径、出库明细被截断，
-            // 两边数字对不上时业务员能立刻看懂原因，并知道要缩小日期范围分批导出
-            detailRows.add(List.of(String.format(
-                    "（导出已达 %d 行上限，本期分录共 %d 行，明细未完；请缩小日期范围分批导出）",
-                    EXPORT_MAX_LINES, totalLines)));
-        }
-        if (truncated) {
-            summaryRows.add(List.of("说明", String.format(
-                    "出库明细超出单次导出上限，仅含前 %d 行（本期分录共 %d 行）",
-                    EXPORT_MAX_LINES, totalLines), "", ""));
         }
 
-        List<XlsxWriter.Sheet> sheets = new ArrayList<>();
-        sheets.add(XlsxWriter.sheet("客户汇总", summaryHeader, summaryRows));
-        sheets.add(XlsxWriter.sheet("出库明细", detailHeader, detailRows));
+        // 2) 关键字口径与汇总页一致（客户名称包含），避免「页面筛选了、导出没筛」
+        String keyword = trimToNull(query.getKeyword());
+        if (keyword != null) {
+            String lower = keyword.toLowerCase();
+            groups.values().removeIf(g -> g.customerName == null
+                    || !g.customerName.toLowerCase().contains(lower));
+        }
+        if (groups.isEmpty()) {
+            throw new BusinessException(ResultCode.DATA_NOT_FOUND,
+                    "所选范围内没有可对账的出库数据，请调整客户或日期区间后重试");
+        }
+
+        // 3) 行数上限：超限显式报错，绝不静默截断对账文件
+        if (rowCount > EXPORT_MAX_LINES) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, String.format(
+                    "本次导出共 %d 行明细，超过单次上限 %d 行；请缩小日期范围或指定客户分批导出",
+                    rowCount, EXPORT_MAX_LINES));
+        }
+
+        // 4) 抬头与落款信息
+        String companyName = configValue(CFG_COMPANY_NAME, DEFAULT_COMPANY_NAME);
+        String companyEnName = configValue(CFG_COMPANY_NAME_EN, DEFAULT_COMPANY_NAME_EN);
+        String companyInfo = configValue(CFG_COMPANY_INFO, DEFAULT_COMPANY_INFO);
+        LocalDate statementDate = LocalDate.now();
+        LoginUser loginUser = operatorContext.current();
+        String preparer = loginUser == null ? null : loginUser.getNickname();
+        Map<Long, String> ownerNames = ownerNames(groups.values());
+
+        List<StatementXlsxWriter.Sheet> sheets = new ArrayList<>();
+        Map<String, Integer> usedNames = new LinkedHashMap<>();
+        for (CustomerGroup group : groups.values()) {
+            KdCustomer customer = statementRepository.findCustomer(
+                    scope.ownerUserId(), group.acctId, group.customerFid);
+            // 客户 × 物料一个 sheet（金样板即按产品分页）；单物料时就是样板原样
+            Map<String, List<StatementXlsxWriter.Row>> byMaterial = new LinkedHashMap<>();
+            for (StatementXlsxWriter.Row row : group.rows) {
+                byMaterial.computeIfAbsent(
+                        row.materialNumber() == null || row.materialNumber().isBlank()
+                                ? "" : row.materialNumber(),
+                        k -> new ArrayList<>()).add(row);
+            }
+            for (Map.Entry<String, List<StatementXlsxWriter.Row>> entry : byMaterial.entrySet()) {
+                String material = entry.getKey();
+                String base = material.isBlank() ? "汇总" : StatementXlsxWriter.sheetName(material);
+                StatementXlsxWriter.Header header = new StatementXlsxWriter.Header(
+                        companyName, companyEnName, companyInfo,
+                        group.customerName, null, null,
+                        customer == null ? null : customer.getAddress(),
+                        statementDate);
+                sheets.add(new StatementXlsxWriter.Sheet(
+                        uniqueName(usedNames, base),
+                        header,
+                        material.isBlank() ? "" : material,
+                        preparer, ownerNames.get(group.ownerUserId),
+                        entry.getValue()));
+            }
+        }
+
         try {
-            return XlsxWriter.write(sheets);
+            String period = scope.from().toLocalDate().format(DATE) + "_"
+                    + scope.toExclusive().toLocalDate().minusDays(1).format(DATE);
+            String fileName = groups.size() == 1
+                    ? "对账单-" + sanitizeFileName(groups.values().iterator().next().customerName)
+                            + "-" + period + ".xlsx"
+                    : "金蝶对账单-" + period + ".xlsx";
+            return new KdStatementExport(fileName, StatementXlsxWriter.write(sheets));
         } catch (IOException e) {
             throw new BusinessException("对账单导出失败：" + e.getMessage());
         }
+    }
+
+    /** 客户分组（导出中间结构，key = 账套 | 客户内码）。 */
+    private static final class CustomerGroup {
+        private final String acctId;
+        private final Long customerFid;
+        private String customerName;
+        private Long ownerUserId;
+        private final List<StatementXlsxWriter.Row> rows = new ArrayList<>();
+
+        private CustomerGroup(String acctId, Long customerFid) {
+            this.acctId = acctId;
+            this.customerFid = customerFid;
+        }
+    }
+
+    /**
+     * 单价：优先金蝶含税单价；缺失时按金额 / 数量反推（4 位精度，与明细页口径一致）。
+     *
+     * @param line   分录
+     * @param amount 金额
+     * @param qty    数量
+     * @return 单价
+     */
+    private static BigDecimal priceOf(KdOutboundLine line, BigDecimal amount, BigDecimal qty) {
+        if (line.getPriceCents() != null && line.getPriceCents() != 0) {
+            return cents(line.getPriceCents());
+        }
+        return derivedPrice(amount, qty);
+    }
+
+    /**
+     * 取系统配置，缺失或空值时退回金样板默认文本。
+     *
+     * @param key      配置键
+     * @param fallback 默认值
+     * @return 配置值
+     */
+    private String configValue(String key, String fallback) {
+        return configRepository.findByKey(key)
+                .map(ConfigItem::getValue)
+                .filter(v -> v != null && !v.isBlank())
+                .orElse(fallback);
+    }
+
+    /** 归属业务员 ID → 姓名（导出落款「业务：」用）。 */
+    private Map<Long, String> ownerNames(Iterable<CustomerGroup> groups) {
+        List<Long> ids = new ArrayList<>();
+        for (CustomerGroup group : groups) {
+            if (group.ownerUserId != null && !ids.contains(group.ownerUserId)) {
+                ids.add(group.ownerUserId);
+            }
+        }
+        if (ids.isEmpty()) {
+            return Map.of();
+        }
+        return bizUserRepository.findNames(ids).stream()
+                .collect(Collectors.toMap(IdName::id, IdName::name, (a, b) -> a));
+    }
+
+    /** sheet 重名时追加序号，保证工作簿内唯一（多客户同物料时会出现）。 */
+    private static String uniqueName(Map<String, Integer> used, String base) {
+        int seq = used.merge(base, 1, Integer::sum);
+        if (seq == 1) {
+            return base;
+        }
+        String suffix = "(" + seq + ")";
+        return base.length() + suffix.length() > 31
+                ? base.substring(0, 31 - suffix.length()) + suffix
+                : base + suffix;
+    }
+
+    /** 文件名里的客户名清洗（去掉 Windows / 浏览器都不欢迎的字符）。 */
+    private static String sanitizeFileName(String name) {
+        String cleaned = name == null ? "" : name.replaceAll("[\\\\/:*?\"<>|\\s]", "");
+        return cleaned.isBlank() ? "客户" : cleaned;
     }
 
     /* ---------------- 内部方法 ---------------- */
@@ -331,7 +462,7 @@ public class KdStatementAppServiceImpl implements KdStatementAppService {
      * @param qty 数量
      * @return 单价，数量为 0 时返回 0
      */
-    private BigDecimal derivedPrice(BigDecimal amount, BigDecimal qty) {
+    private static BigDecimal derivedPrice(BigDecimal amount, BigDecimal qty) {
         if (amount == null || qty == null || qty.compareTo(BigDecimal.ZERO) == 0) {
             return BigDecimal.ZERO;
         }
@@ -418,25 +549,7 @@ public class KdStatementAppServiceImpl implements KdStatementAppService {
         return trimmed.isEmpty() ? null : trimmed;
     }
 
-    private static String nullToEmpty(String text) {
-        return text == null ? "" : text;
-    }
-
     private static BigDecimal cents(Long value) {
         return BigDecimal.valueOf(value == null ? 0L : value, 2);
-    }
-
-    private static String money(BigDecimal value) {
-        return (value == null ? BigDecimal.ZERO : value).setScale(2, java.math.RoundingMode.HALF_UP)
-                .toPlainString();
-    }
-
-    private static String qty(BigDecimal value) {
-        return (value == null ? BigDecimal.ZERO : value).stripTrailingZeros().toPlainString();
-    }
-
-    private static BigDecimal sumAmount(Map<String, BigDecimal> amountByKey, java.util.Set<String> keys) {
-        return keys.stream().map(k -> Objects.requireNonNullElse(amountByKey.get(k), BigDecimal.ZERO))
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 }
