@@ -46,9 +46,12 @@ spring:
       auto-commit: true
 
   ## 迁移：沿用同一套 Flyway 脚本，SQLite 首次启动自动建表 + 初始化数据
+  ## db/vendor/sqlite：列宽变更等 DDL 各库语法不同时按库分发（V22 起）。
+  ## Flyway 社区版不解析 {vendor} 占位符（Teams 功能），本 profile 固定 SQLite
+  ##（空操作脚本，占住版本号保持三库 schema_version 一致）。
   flyway:
     enabled: true
-    locations: classpath:db/migration
+    locations: classpath:db/migration,classpath:db/vendor/sqlite
     baseline-on-migrate: true
     # SQLite 与 MySQL 的 DDL 分支由脚本自身处理，过渡期不做过严校验
     validate-on-migrate: false

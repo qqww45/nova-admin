@@ -20,9 +20,15 @@ spring:
       auto-commit: true
 
   ## 数据库迁移：启动即自动执行 db/migration 下的版本脚本
+  ## db/vendor/<库>：列宽变更等 DDL 各库语法不同时按库分发（V22 起）。
+  ## 注意两点：
+  ##   1) vendor 目录必须放在 db/migration 树之外——classpath 扫描会递归进子目录，
+  ##      放在 migration/ 下会让同一版本号被多个库的脚本同时命中；
+  ##   2) Flyway 社区版不解析 {vendor} 占位符（Teams 功能），必须写死到具体库目录，
+  ##      本 profile 固定 SQLite。
   flyway:
     enabled: true
-    locations: classpath:db/migration
+    locations: classpath:db/migration,classpath:db/vendor/sqlite
     baseline-on-migrate: true
     validate-on-migrate: false
     # 迁移脚本编码与项目一致
