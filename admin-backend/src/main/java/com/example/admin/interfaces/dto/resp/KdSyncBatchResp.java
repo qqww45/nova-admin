@@ -27,6 +27,9 @@ public class KdSyncBatchResp {
     @Schema(description = "数据归属人")
     private String ownerUserId;
 
+    @Schema(description = "数据归属人姓名（管理员排查时辨认业务员）")
+    private String ownerUserName;
+
     @Schema(description = "账套")
     private String acctId;
 

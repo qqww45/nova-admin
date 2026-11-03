@@ -7,6 +7,7 @@ import com.example.admin.common.exception.BusinessException;
 import com.example.admin.common.result.PageResult;
 import com.example.admin.common.result.ResultCode;
 import com.example.admin.domain.model.auth.LoginUser;
+import com.example.admin.domain.model.common.IdName;
 import com.example.admin.domain.model.kd.KdBatchQuery;
 import com.example.admin.domain.model.kd.KdBatchStatus;
 import com.example.admin.domain.model.kd.KdBinding;
@@ -21,6 +22,7 @@ import com.example.admin.domain.model.kd.KdSyncTask;
 import com.example.admin.domain.model.kd.KdUpsertResult;
 import com.example.admin.domain.port.KdClientContext;
 import com.example.admin.domain.port.OperatorContext;
+import com.example.admin.domain.repository.BizUserRepository;
 import com.example.admin.domain.repository.KdBindingRepository;
 import com.example.admin.domain.repository.KdCustomerRepository;
 import com.example.admin.domain.repository.KdFieldMappingRepository;
@@ -47,6 +49,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Collectors;
 
 /**
  * 采集器上行同步应用服务实现。
@@ -82,6 +86,7 @@ public class KdSyncAppServiceImpl implements KdSyncAppService {
     private final KdOutboundRepository outboundRepository;
     private final KdOutboundLineRepository lineRepository;
     private final KdSyncBatchRepository batchRepository;
+    private final BizUserRepository bizUserRepository;
     private final OperatorContext operatorContext;
     private final KdClientContext kdClientContext;
 
@@ -287,12 +292,21 @@ public class KdSyncAppServiceImpl implements KdSyncAppService {
         domainQuery.setOwnerUserId(isAdmin(loginUser) ? null : operatorContext.currentUserId());
         PageResult<KdSyncBatch> page = batchRepository.page(domainQuery);
 
+        // 批次归属人姓名：管理员跨业务员排查时辨认"这是谁同步的"
+        Map<Long, String> ownerNames = page.getRecords().isEmpty()
+                ? Map.of()
+                : bizUserRepository.findNames(page.getRecords().stream()
+                        .map(KdSyncBatch::getOwnerUserId).filter(Objects::nonNull)
+                        .distinct().toList())
+                .stream().collect(Collectors.toMap(IdName::id, IdName::name, (a, b) -> a));
+
         PageResult<KdSyncBatchResp> result = new PageResult<>();
         result.setTotal(page.getTotal());
         result.setPageNum(page.getPageNum());
         result.setPageSize(page.getPageSize());
         result.setPages(page.getPages());
-        result.setRecords(page.getRecords().stream().map(this::toBatchResp).toList());
+        result.setRecords(page.getRecords().stream()
+                .map(batch -> toBatchResp(batch, ownerNames)).toList());
         return result;
     }
 
@@ -395,14 +409,16 @@ public class KdSyncAppServiceImpl implements KdSyncAppService {
      * 批次领域模型 → 响应。
      *
      * @param batch 批次
+     * @param ownerNames 归属人 ID → 姓名
      * @return 响应
      */
-    private KdSyncBatchResp toBatchResp(KdSyncBatch batch) {
+    private KdSyncBatchResp toBatchResp(KdSyncBatch batch, Map<Long, String> ownerNames) {
         KdSyncBatchResp resp = new KdSyncBatchResp();
         resp.setId(str(batch.getId()));
         resp.setBatchNo(batch.getBatchNo());
         resp.setBindingId(str(batch.getBindingId()));
         resp.setOwnerUserId(str(batch.getOwnerUserId()));
+        resp.setOwnerUserName(ownerNames.get(batch.getOwnerUserId()));
         resp.setAcctId(batch.getAcctId());
         resp.setEntity(batch.getEntity());
         resp.setMode(batch.getMode());
