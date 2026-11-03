@@ -14,6 +14,9 @@ import type {
   KdOutboundDataQuery,
   KdOutboundDataResp,
   KdOutboundLineDataResp,
+  KdAutoSuggestResult,
+  KdCustomerMappingResp,
+  KdMappingSaveReq,
   KdOwnerResp,
   KdStatementDetailResp,
   KdStatementHealthResp,
@@ -89,6 +92,35 @@ export const kdConfigApi = {
   /** 保存字段映射 */
   saveMapping(data: KdFieldMappingSaveReq): Promise<void> {
     return http.post<void>('/kd/config/mapping', data);
+  },
+};
+
+/**
+ * 金蝶客户 ↔ 内部客户映射（试点批 R4）。
+ *
+ * <p>两套客户体系的桥：业务员在页面确认映射，后续两口径联动才有地基。
+ */
+export const kdMappingApi = {
+  /** 映射行列表（一个金蝶客户一行，含未匹配 / 建议 / 已确认状态） */
+  list(params: {
+    acctId?: string;
+    status?: string;
+    keyword?: string;
+    ownerUserId?: string;
+  }): Promise<KdCustomerMappingResp[]> {
+    return http.get<KdCustomerMappingResp[]>('/kd/mapping/list', params);
+  },
+
+  /** 自动匹配建议：名称标准化唯一命中生成待确认建议 */
+  autoSuggest(acctId?: string, ownerUserId?: string): Promise<KdAutoSuggestResult> {
+    return http.post<KdAutoSuggestResult>('/kd/mapping/auto-suggest', undefined, {
+      params: { acctId, ownerUserId },
+    });
+  },
+
+  /** 人工保存映射（视为已确认） */
+  save(data: KdMappingSaveReq): Promise<void> {
+    return http.post<void>('/kd/mapping/save', data);
   },
 };
 

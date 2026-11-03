@@ -45,11 +45,12 @@ class FlywayMigrationTest {
             assertTrue(Integer.parseInt(lastVersion) >= 16,
                     "金蝶同步迁移（V15/V16）应已执行，实际最后版本：" + lastVersion);
 
-            // 关键表存在性：迁移里写错表名不会报错，只会让运行时"表不存在"
-            try (var conn = java.sql.DriverManager.getConnection("jdbc:sqlite:" + dbFile.toAbsolutePath());
-                 var stmt = conn.createStatement()) {
-                for (String table : new String[]{"kd_binding", "kd_binding_code", "kd_sync_task",
-                        "kd_field_mapping", "kd_customer", "kd_outbound", "kd_outbound_line", "kd_sync_batch"}) {
+                // 关键表存在性：迁移里写错表名不会报错，只会让运行时"表不存在"
+                try (var conn = java.sql.DriverManager.getConnection("jdbc:sqlite:" + dbFile.toAbsolutePath());
+                     var stmt = conn.createStatement()) {
+                    for (String table : new String[]{"kd_binding", "kd_binding_code", "kd_sync_task",
+                            "kd_field_mapping", "kd_customer", "kd_outbound", "kd_outbound_line", "kd_sync_batch",
+                            "kd_customer_mapping"}) {
                     try (var rs = stmt.executeQuery(
                             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='" + table + "'")) {
                         rs.next();
@@ -79,7 +80,8 @@ class FlywayMigrationTest {
                 // 排查"数据为什么没上来"是业务员的自查诉求，断言一并锁定。
                 for (String permission : new String[]{"kd:statement:list", "kd:statement:export",
                         "kd:binding:list", "kd:binding:code", "kd:binding:command", "kd:sync:list",
-                        "kd:outbound:list", "kd:customer:list", "kd:line:list"}) {
+                        "kd:outbound:list", "kd:customer:list", "kd:line:list",
+                        "kd:customer-mapping:list", "kd:customer-mapping:edit"}) {
                     try (var rs = stmt.executeQuery(
                             "SELECT COUNT(*) FROM sys_role_menu rm JOIN sys_menu m ON rm.menu_id = m.id "
                                     + "WHERE rm.role_id = 3 AND m.permission = '" + permission + "'")) {
