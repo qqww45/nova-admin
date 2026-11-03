@@ -68,7 +68,17 @@
             合计 <b class="money">{{ money(detail?.totalAmount) }}</b>
           </span>
           <span class="cell-sub">{{ detail?.dateFrom }} ~ {{ detail?.dateTo }}</span>
-        </div>
+          <span class="detail-head__spacer" />
+          <el-button
+            v-if="canExport"
+            type="primary"
+            size="small"
+            :loading="exportingDetail"
+            @click="exportCurrentCustomer"
+          >
+            导出该客户对账单
+          </el-button>
+   70|        </div>
 
         <el-table :data="detail?.bills ?? []" border size="small" row-key="billNo" default-expand-all>
           <el-table-column type="expand">
@@ -150,6 +160,7 @@ const columns: ProTableColumn[] = [
 
 const detailVisible = ref(false);
 const detailLoading = ref(false);
+const exportingDetail = ref(false);
 const detail = ref<KdStatementDetailResp | null>(null);
 const detailTitle = computed(() =>
   detail.value?.customerName ? `对账明细 · ${detail.value.customerName}` : '对账明细',
@@ -189,6 +200,23 @@ async function handleExport(): Promise<void> {
   }
 }
 
+/** 业务员最常见的对账动作是"给某一个客户出单"：明细页一键导出，不用回列表拼查询条件 */
+async function exportCurrentCustomer(): Promise<void> {
+  if (!detail.value?.customerFid) return;
+  exportingDetail.value = true;
+  try {
+    await kdStatementApi.export({
+      ...currentQuery(),
+      acctId: detail.value.acctId || currentQuery().acctId,
+      customerFid: detail.value.customerFid,
+    });
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : String(e));
+  } finally {
+    exportingDetail.value = false;
+  }
+}
+
 /** 金额统一两位小数；接口返回是 number（元） */
 function money(value?: number | null): string {
   if (value == null) return '0.00';
@@ -218,5 +246,9 @@ function money(value?: number | null): string {
   flex-wrap: wrap;
   margin-bottom: 12px;
   font-size: 13px;
+
+  &__spacer {
+    flex: 1;
+  }
 }
 </style>

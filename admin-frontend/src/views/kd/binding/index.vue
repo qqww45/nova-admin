@@ -42,6 +42,17 @@
         <div class="cell-sub">{{ (row as KdBindingResp).lastSyncResult || '' }}</div>
       </template>
 
+      <template #col-online="{ row }">
+        <el-tooltip
+          :content="`心跳时间：${(row as KdBindingResp).lastUsedAt || '从未上线'}（采集器每 15 秒轮询一次指令）`"
+          placement="top"
+        >
+          <el-tag :type="isOnline((row as KdBindingResp).lastUsedAt) ? 'success' : 'info'" size="small">
+            {{ onlineLabel((row as KdBindingResp).lastUsedAt) }}
+          </el-tag>
+        </el-tooltip>
+      </template>
+
       <template #columns>
         <el-table-column label="操作" width="200" align="center" fixed="right">
           <template #default="{ row }">
@@ -166,6 +177,7 @@ const list = ref<KdBindingResp[]>([]);
 const columns: ProTableColumn[] = [
   { prop: 'userName', label: '业务员', width: 120 },
   { prop: 'acctInfo', label: '账套 / 金蝶账号', minWidth: 180, slot: true },
+  { prop: 'online', label: '采集器在线', width: 110, slot: true },
   { prop: 'machineName', label: '机器', width: 140, showOverflowTooltip: true },
   { prop: 'clientVersion', label: '版本', width: 90 },
   { prop: 'tokenPrefix', label: '令牌', width: 110, slot: true },
@@ -290,6 +302,34 @@ function commandTagType(status: string): 'info' | 'warning' | 'success' | 'dange
 }
 
 /* ---------------- 工具 ---------------- */
+
+/** 在线判定窗口：指令轮询周期 15 秒，放宽到 2 分钟以容忍网络抖动 */
+const ONLINE_THRESHOLD_MS = 2 * 60 * 1000;
+
+/**
+ * 采集器是否在线（按指令轮询心跳判断）。
+ *
+ * <p>业务员自助排查第一步："数据没上来"十有八九是采集器没开机 / 没联网，
+ * 在线状态让这一眼就能看出来，不用管理员翻指令记录。
+ */
+function isOnline(lastUsedAt?: string): boolean {
+  if (!lastUsedAt) return false;
+  const time = new Date(lastUsedAt.replace(' ', 'T')).getTime();
+  return Number.isFinite(time) && Date.now() - time <= ONLINE_THRESHOLD_MS;
+}
+
+function onlineLabel(lastUsedAt?: string): string {
+  if (!lastUsedAt) return '未上线';
+  const time = new Date(lastUsedAt.replace(' ', 'T')).getTime();
+  if (!Number.isFinite(time)) return '未知';
+  if (isOnline(lastUsedAt)) return '在线';
+  const minutes = Math.floor((Date.now() - time) / 60_000);
+  if (minutes < 60) return `离线 ${minutes} 分钟`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `离线 ${hours} 小时`;
+  return `离线 ${Math.floor(hours / 24)} 天`;
+}
+
 async function copy(text: string): Promise<void> {
   try {
     await navigator.clipboard.writeText(text);
