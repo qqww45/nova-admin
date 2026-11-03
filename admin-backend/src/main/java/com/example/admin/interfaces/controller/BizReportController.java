@@ -4,6 +4,7 @@ import com.example.admin.application.service.ReportAppService;
 import com.example.admin.common.result.R;
 import com.example.admin.interfaces.dto.resp.CustomerSummaryResp;
 import com.example.admin.interfaces.dto.resp.HealthReportResp;
+import com.example.admin.interfaces.dto.resp.OpenOrderItemResp;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -57,5 +58,20 @@ public class BizReportController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate begin,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end) {
         return R.ok(reportService.customerSummary(begin, end));
+    }
+
+    /**
+     * 催单清单（未交订单明细）。
+     *
+     * <p>业务员催单按客户要货：行序先客户后下单时间，打印或截图即可去催生产、回复客户。
+     * 权限复用报表查询，不新增菜单。
+     *
+     * @return 未交明细列表
+     */
+    @GetMapping("/open-items")
+    @PreAuthorize("@ss.hasPermi('biz:report:view')")
+    @Operation(summary = "催单清单", description = "全部未交订单明细（qtyOpen > 0 且未取消），按客户聚合排序")
+    public R<List<OpenOrderItemResp>> openItems() {
+        return R.ok(reportService.openItems());
     }
 }

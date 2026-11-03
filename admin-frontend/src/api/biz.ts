@@ -11,6 +11,7 @@ import type {
   ImportBatchResp,
   ImportCommitResp,
   ImportPreviewResp,
+  OpenOrderItemResp,
   OrderDetailResp,
   OrderItemResp,
   OrderQuery,
@@ -19,6 +20,7 @@ import type {
   OperationLogResp,
   CustomerSummaryResp,
   HealthReportResp,
+  ReceivableSummaryResp,
   ShipmentBatchResultResp,
   ShipmentQuery,
   ShipmentResp,
@@ -300,6 +302,11 @@ export const reportApi = {
   customerSummary(begin?: string, end?: string): Promise<CustomerSummaryResp[]> {
     return http.get<CustomerSummaryResp[]>('/biz/report/customer-summary', { begin, end });
   },
+
+  /** 催单清单（未交订单明细，按客户聚合排序） */
+  openItems(): Promise<OpenOrderItemResp[]> {
+    return http.get<OpenOrderItemResp[]>('/biz/report/open-items');
+  },
 };
 
 /* ---------------- 操作日志 ---------------- */
@@ -383,6 +390,11 @@ export const statementApi = {
   /** 实时预览（不落库） */
   preview(data: StatementPreviewReq): Promise<StatementPreviewResp> {
     return http.post<StatementPreviewResp>('/biz/statement/preview', data);
+  },
+
+  /** 客户应收速览（催款优先级，按余额倒序） */
+  receivableSummary(): Promise<ReceivableSummaryResp[]> {
+    return http.get<ReceivableSummaryResp[]>('/biz/statement/receivable-summary');
   },
 
   /** 生成并保存对账单快照 */

@@ -38,6 +38,12 @@ public class CustomerOpeningRepositoryImpl implements CustomerOpeningRepository 
     }
 
     @Override
+    public List<CustomerOpening> listAll() {
+        return openingMapper.selectList(new LambdaQueryWrapper<BizCustomerOpening>())
+                .stream().map(converter::openingToDomain).toList();
+    }
+
+    @Override
     public Long save(CustomerOpening opening) {
         BizCustomerOpening po = converter.openingToPo(opening);
         openingMapper.insert(po);

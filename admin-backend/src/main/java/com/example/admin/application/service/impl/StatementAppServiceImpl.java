@@ -29,6 +29,7 @@ import com.example.admin.infrastructure.excel.XlsxWriter;
 import com.example.admin.interfaces.dto.req.StatementGenerateReq;
 import com.example.admin.interfaces.dto.req.StatementPageQuery;
 import com.example.admin.interfaces.dto.req.StatementPreviewReq;
+import com.example.admin.interfaces.dto.resp.ReceivableSummaryResp;
 import com.example.admin.interfaces.dto.resp.StatementLineResp;
 import com.example.admin.interfaces.dto.resp.StatementPreviewResp;
 import com.example.admin.interfaces.dto.resp.StatementResp;
@@ -44,7 +45,11 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * 对账单应用服务实现。
@@ -274,24 +279,94 @@ public class StatementAppServiceImpl implements StatementAppService {
         List<Shipment> shipments = shipmentRepository.listByCustomerAndPeriod(customerId, start, end);
         List<StatementGenerator.ShipmentFact> shipFacts = new ArrayList<>();
         for (Shipment s : shipments) {
-            ShipmentType type = s.getShipmentType() == null ? ShipmentType.SHIP : s.getShipmentType();
-            BigDecimal amt = s.getAmountTaxIncluded() == null ? BigDecimal.ZERO : s.getAmountTaxIncluded();
-            BigDecimal qty = s.getQty() == null ? BigDecimal.ZERO : s.getQty();
-            BigDecimal unitPrice = qty.compareTo(BigDecimal.ZERO) != 0
-                    ? amt.divide(qty.abs(), 4, RoundingMode.HALF_UP) : BigDecimal.ZERO;
-            shipFacts.add(new StatementGenerator.ShipmentFact(
-                    s.getId(), type, s.getShipDate(), s.getProcessOrderNo(), s.getCustomerOrderNo(),
-                    s.getMaterialNo(), s.getModel(), s.getSpec(), null, qty, unitPrice, amt, null));
+            shipFacts.add(toShipFact(s));
         }
 
         List<Receipt> receipts = receiptRepository.listByCustomerAndPeriod(customerId, start, end);
         List<StatementGenerator.ReceiptFact> receiptFacts = new ArrayList<>();
         for (Receipt r : receipts) {
-            receiptFacts.add(new StatementGenerator.ReceiptFact(
-                    r.getId(), r.getReceiptDate(), r.getReceiptNo(), r.getAmount(), null));
+            receiptFacts.add(toReceiptFact(r));
         }
 
         return StatementGenerator.generate(openingBalance, shipFacts, receiptFacts);
+    }
+
+    @Override
+    public List<ReceivableSummaryResp> receivableSummaries() {
+        Map<Long, String> customerNames = new HashMap<>();
+        for (Customer customer : customerRepository.listAll()) {
+            customerNames.put(customer.getId(), customer.getCustomerName());
+        }
+        // 一次拉全量再按客户分组（万级内存聚合，与报表现有决策一致），
+        // 避免客户数 × 3 次查询的 N+1
+        Map<Long, List<Shipment>> shipmentsByCustomer = new HashMap<>();
+        for (Shipment s : shipmentRepository.listAll()) {
+            shipmentsByCustomer.computeIfAbsent(s.getCustomerId(), k -> new ArrayList<>()).add(s);
+        }
+        Map<Long, List<Receipt>> receiptsByCustomer = new HashMap<>();
+        for (Receipt r : receiptRepository.listAll()) {
+            receiptsByCustomer.computeIfAbsent(r.getCustomerId(), k -> new ArrayList<>()).add(r);
+        }
+        Map<Long, BigDecimal> openings = new HashMap<>();
+        for (CustomerOpening o : openingRepository.listAll()) {
+            openings.put(o.getCustomerId(),
+                    o.getOpeningBalance() == null ? BigDecimal.ZERO : o.getOpeningBalance());
+        }
+
+        // 有期初或有出货或有收款的客户才进清单；三者皆无 = 与该客户无应收往来
+        Set<Long> activeIds = new HashSet<>();
+        activeIds.addAll(openings.keySet());
+        activeIds.addAll(shipmentsByCustomer.keySet());
+        activeIds.addAll(receiptsByCustomer.keySet());
+
+        List<ReceivableSummaryResp> rows = new ArrayList<>(activeIds.size());
+        for (Long customerId : activeIds) {
+            List<Shipment> shipments = shipmentsByCustomer.getOrDefault(customerId, List.of());
+            List<Receipt> receipts = receiptsByCustomer.getOrDefault(customerId, List.of());
+            StatementGenerator.StatementSummary summary = StatementGenerator.generate(
+                    openings.getOrDefault(customerId, BigDecimal.ZERO),
+                    shipments.stream().map(this::toShipFact).toList(),
+                    receipts.stream().map(this::toReceiptFact).toList()).summary();
+
+            ReceivableSummaryResp resp = new ReceivableSummaryResp();
+            resp.setCustomerId(customerId == null ? null : String.valueOf(customerId));
+            resp.setCustomerName(customerNames.get(customerId));
+            resp.setOpeningBalance(summary.openingBalance());
+            resp.setShippedAmount(summary.shippedAmount());
+            resp.setReturnedAmount(summary.returnedAmount());
+            resp.setReceivedAmount(summary.receivedAmount());
+            resp.setEndingBalance(summary.endingBalance());
+            // listAll 已按日期升序：最后一条即最近一次
+            resp.setLastShipmentDate(shipments.isEmpty() ? null : shipments.get(shipments.size() - 1).getShipDate());
+            resp.setLastReceiptDate(receipts.isEmpty() ? null : receipts.get(receipts.size() - 1).getReceiptDate());
+            rows.add(resp);
+        }
+        // 余额倒序：欠得最多的排最前，催款优先级一眼可见
+        rows.sort((a, b) -> nvl(b.getEndingBalance()).compareTo(nvl(a.getEndingBalance())));
+        return rows;
+    }
+
+    /** 空值安全：null 按零处理 */
+    private static BigDecimal nvl(BigDecimal value) {
+        return value == null ? BigDecimal.ZERO : value;
+    }
+
+    /** 出货领域对象 → 对账聚合事实（口径与对账单/预览完全一致） */
+    private StatementGenerator.ShipmentFact toShipFact(Shipment s) {
+        ShipmentType type = s.getShipmentType() == null ? ShipmentType.SHIP : s.getShipmentType();
+        BigDecimal amt = s.getAmountTaxIncluded() == null ? BigDecimal.ZERO : s.getAmountTaxIncluded();
+        BigDecimal qty = s.getQty() == null ? BigDecimal.ZERO : s.getQty();
+        BigDecimal unitPrice = qty.compareTo(BigDecimal.ZERO) != 0
+                ? amt.divide(qty.abs(), 4, RoundingMode.HALF_UP) : BigDecimal.ZERO;
+        return new StatementGenerator.ShipmentFact(
+                s.getId(), type, s.getShipDate(), s.getProcessOrderNo(), s.getCustomerOrderNo(),
+                s.getMaterialNo(), s.getModel(), s.getSpec(), null, qty, unitPrice, amt, null);
+    }
+
+    /** 收款领域对象 → 对账聚合事实 */
+    private StatementGenerator.ReceiptFact toReceiptFact(Receipt r) {
+        return new StatementGenerator.ReceiptFact(
+                r.getId(), r.getReceiptDate(), r.getReceiptNo(), r.getAmount(), null);
     }
 
     private Statement load(String id) {

@@ -2,6 +2,7 @@ package com.example.admin.application.service.impl;
 
 import com.example.admin.domain.model.customer.Customer;
 import com.example.admin.domain.model.dict.DictItem;
+import com.example.admin.domain.model.order.ItemStatus;
 import com.example.admin.domain.model.order.SalesOrder;
 import com.example.admin.domain.model.order.SalesOrderItem;
 import com.example.admin.domain.model.shipment.ShipmentQuery;
@@ -11,6 +12,7 @@ import com.example.admin.domain.repository.OrderRepository;
 import com.example.admin.domain.repository.ShipmentRepository;
 import com.example.admin.interfaces.dto.resp.CustomerSummaryResp;
 import com.example.admin.interfaces.dto.resp.HealthReportResp;
+import com.example.admin.interfaces.dto.resp.OpenOrderItemResp;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -19,6 +21,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -165,8 +168,57 @@ public class ReportAppServiceImpl implements com.example.admin.application.servi
                 .toList();
     }
 
-    /* ---------------- 私有辅助 ---------------- */
 
+
+    /**
+     * 催单清单：全部未交订单明细。
+     *
+     * @return 未交明细列表
+     */
+    @Override
+    public List<OpenOrderItemResp> openItems() {
+        Map<Long, String> customerNames = new HashMap<>();
+        for (Customer customer : customerRepository.listAll()) {
+            customerNames.put(customer.getId(), customer.getCustomerName());
+        }
+        List<OpenOrderItemResp> rows = new ArrayList<>();
+        // listForReport 返回不可变列表，复制后再排序
+        List<SalesOrder> orders = new ArrayList<>(orderRepository.listForReport(null, null));
+        // 先按客户名、下单时间排序订单，保证行序天然满足"同客户相邻、先下先出"
+        orders.sort(Comparator
+                .comparing((SalesOrder o) -> customerNames.getOrDefault(o.getCustomerId(),
+                        o.getCustomerName() == null ? "" : o.getCustomerName()))
+                .thenComparing(SalesOrder::getOrderDate, Comparator.nullsLast(Comparator.naturalOrder())));
+        for (SalesOrder order : orders) {
+            for (SalesOrderItem item : order.getItems()) {
+                if (item.getStatus() == ItemStatus.CANCELED) {
+                    continue;
+                }
+                BigDecimal open = nz(item.getQtyOpen());
+                if (open.compareTo(BigDecimal.ZERO) <= 0) {
+                    continue;
+                }
+                OpenOrderItemResp resp = new OpenOrderItemResp();
+                resp.setOrderId(order.getId() == null ? null : String.valueOf(order.getId()));
+                resp.setOrderNo(order.getOrderNo());
+                resp.setCustomerName(customerNames.getOrDefault(order.getCustomerId(), order.getCustomerName()));
+                resp.setCustomerOrderNo(order.getCustomerOrderNo());
+                resp.setSalesmanName(order.getSalesmanName());
+                resp.setOrderDate(order.getOrderDate());
+                resp.setExpectedDeliveryDate(order.getExpectedDeliveryDate());
+                resp.setModel(item.getModel());
+                resp.setMaterialNo(item.getMaterialNo());
+                resp.setSpec(item.getSpec());
+                resp.setQtyOrdered(nz(item.getQtyOrdered()));
+                resp.setQtyShipped(nz(item.getQtyShipped()));
+                resp.setQtyOpen(open);
+                rows.add(resp);
+            }
+        }
+        return rows;
+    }
+
+    /* ---------------- 私有辅助 ---------------- */
     /**
      * 登记一条问题（受每类上限约束）。
      *

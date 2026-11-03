@@ -432,6 +432,36 @@ export interface CustomerSummaryResp {
   amountTaxIncluded: number;
 }
 
+/** 催单清单行（未交订单明细） */
+export interface OpenOrderItemResp {
+  orderId?: string;
+  orderNo?: string;
+  customerName?: string;
+  customerOrderNo?: string;
+  salesmanName?: string;
+  orderDate?: string;
+  expectedDeliveryDate?: string;
+  model?: string;
+  materialNo?: string;
+  spec?: string;
+  qtyOrdered: number;
+  qtyShipped: number;
+  qtyOpen: number;
+}
+
+/** 客户应收速览行（全期间余额，与对账单同口径） */
+export interface ReceivableSummaryResp {
+  customerId?: string;
+  customerName?: string;
+  openingBalance: number;
+  shippedAmount: number;
+  returnedAmount: number;
+  receivedAmount: number;
+  endingBalance: number;
+  lastShipmentDate?: string;
+  lastReceiptDate?: string;
+}
+
 /* ---------------- 操作日志 ---------------- */
 
 /** 操作日志 */

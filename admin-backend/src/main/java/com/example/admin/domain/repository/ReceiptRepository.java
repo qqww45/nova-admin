@@ -32,4 +32,11 @@ public interface ReceiptRepository {
 
     /** 查询某客户在指定期间内的收款（对账单聚合用，已按日期升序，自动排除已作废） */
     List<Receipt> listByCustomerAndPeriod(Long customerId, LocalDateTime start, LocalDateTime end);
+
+    /**
+     * 全部有效收款（排除作废），应收速览等内存聚合用。
+     *
+     * @return 收款列表，按收款日期升序
+     */
+    List<Receipt> listAll();
 }
