@@ -1,6 +1,7 @@
 package com.example.admin.application.service.impl;
 
 import com.example.admin.common.exception.BusinessException;
+import com.example.admin.common.result.PageResult;
 import com.example.admin.domain.model.auth.LoginUser;
 import com.example.admin.domain.model.kd.KdOutbound;
 import com.example.admin.domain.model.kd.KdOutboundLine;
@@ -8,6 +9,7 @@ import com.example.admin.domain.port.OperatorContext;
 import com.example.admin.domain.repository.KdStatementRepository;
 import com.example.admin.interfaces.dto.req.KdStatementQuery;
 import com.example.admin.interfaces.dto.resp.KdStatementHealthResp;
+import com.example.admin.interfaces.dto.resp.KdStatementSummaryResp;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -62,6 +64,53 @@ class KdStatementAppServiceImplTest {
 
     @InjectMocks
     private KdStatementAppServiceImpl service;
+
+    /**
+     * summary / detail / export 现在都会回查客户编码；
+     * 默认返回空映射，个别用例再覆写具体值。窗口校验失败等路径不会走到这里，
+     * 因此用 lenient 避免 strict stub 报 UnnecessaryStubbing。
+     */
+    @org.junit.jupiter.api.BeforeEach
+    void stubCustomerNumbers() {
+        org.mockito.Mockito.lenient()
+                .when(statementRepository.findCustomerNumbers(any(), anyList()))
+                .thenReturn(java.util.Map.of());
+    }
+
+    @Test
+    @DisplayName("汇总行必须回填金蝶客户编码（重名客户识别）")
+    void summaryShouldCarryCustomerNumber() {
+        when(operatorContext.current()).thenReturn(user("admin"));
+        when(statementRepository.listBills(any(), any(), any(), any(), any()))
+                .thenReturn(List.of(bill(5001L, 1001L, "深圳示例客户", "2026-10-10T00:00:00")));
+        when(statementRepository.findCustomerNumbers(any(), anyList()))
+                .thenReturn(java.util.Map.of("ACCT_A|1001", "CUST-001"));
+
+        PageResult<KdStatementSummaryResp> page = service.summary(query("2026-10-01", "2026-10-31"));
+
+        assertEquals(1, page.getRecords().size());
+        assertEquals("CUST-001", page.getRecords().get(0).getCustomerNumber(),
+                "汇总行应回填金蝶客户编码");
+    }
+
+    @Test
+    @DisplayName("导出两个 sheet 都必须带客户编码列")
+    void exportShouldCarryCustomerNumber() throws IOException {
+        when(operatorContext.current()).thenReturn(user("admin"));
+        when(statementRepository.listBills(any(), any(), any(), any(), any()))
+                .thenReturn(List.of(bill(5001L, 1001L, "深圳示例客户", "2026-10-10T00:00:00")));
+        when(statementRepository.findCustomerNumbers(any(), anyList()))
+                .thenReturn(java.util.Map.of("ACCT_A|1001", "CUST-001"));
+        when(statementRepository.listLines(any(), anyList()))
+                .thenReturn(List.of(line(5001L, 90001L, 123456L)));
+
+        byte[] bytes = service.export(query("2026-10-01", "2026-10-31"));
+
+        String summaryXml = sheetXml(bytes, 1);
+        String detailXml = sheetXml(bytes, 2);
+        assertTrue(summaryXml.contains("CUST-001"), "客户汇总 sheet 应含客户编码");
+        assertTrue(detailXml.contains("CUST-001"), "出库明细 sheet 应含客户编码");
+    }
 
     @Test
     @DisplayName("业务员（非超管）查询必须按本人 ownerUserId 隔离")

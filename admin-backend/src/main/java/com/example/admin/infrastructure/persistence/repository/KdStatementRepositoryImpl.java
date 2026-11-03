@@ -6,8 +6,10 @@ import com.example.admin.domain.model.kd.KdOutbound;
 import com.example.admin.domain.model.kd.KdOutboundLine;
 import com.example.admin.domain.repository.KdStatementRepository;
 import com.example.admin.infrastructure.persistence.converter.KdConverter;
+import com.example.admin.infrastructure.persistence.mapper.KdCustomerMapper;
 import com.example.admin.infrastructure.persistence.mapper.KdOutboundLineMapper;
 import com.example.admin.infrastructure.persistence.mapper.KdOutboundMapper;
+import com.example.admin.infrastructure.persistence.po.KdCustomerPo;
 import com.example.admin.infrastructure.persistence.po.KdOutboundLinePo;
 import com.example.admin.infrastructure.persistence.po.KdOutboundPo;
 import lombok.RequiredArgsConstructor;
@@ -18,6 +20,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * 对账取数仓储实现。
@@ -34,6 +37,7 @@ public class KdStatementRepositoryImpl implements KdStatementRepository {
 
     private final KdOutboundMapper outboundMapper;
     private final KdOutboundLineMapper lineMapper;
+    private final KdCustomerMapper customerMapper;
     private final KdConverter converter;
 
     @Override
@@ -92,5 +96,38 @@ public class KdStatementRepositoryImpl implements KdStatementRepository {
                 .orderByAsc(KdOutboundPo::getBizDate)
                 .orderByAsc(KdOutboundPo::getBillNo);
         return outboundMapper.selectList(wrapper).stream().map(converter::outboundToDomain).toList();
+    }
+
+    @Override
+    public Map<String, String> findCustomerNumbers(Long ownerUserId, List<KdOutbound> bills) {
+        if (bills == null || bills.isEmpty()) {
+            return Map.of();
+        }
+        // 金蝶客户内码只在账套内唯一：与取数一致，必须按账套分组过滤
+        Map<String, List<Long>> fidsByAcct = new LinkedHashMap<>();
+        for (KdOutbound bill : bills) {
+            String acct = bill.getAcctId() == null ? "" : bill.getAcctId();
+            fidsByAcct.computeIfAbsent(acct, k -> new ArrayList<>()).add(bill.getCustomerFid());
+        }
+        Map<String, String> result = new LinkedHashMap<>();
+        for (Map.Entry<String, List<Long>> entry : fidsByAcct.entrySet()) {
+            List<Long> fids = entry.getValue().stream().filter(Objects::nonNull).distinct().toList();
+            for (List<Long> chunk : ListUtil.partition(fids, IN_CHUNK)) {
+                if (chunk.isEmpty()) {
+                    continue;
+                }
+                List<KdCustomerPo> list = customerMapper.selectList(new LambdaQueryWrapper<KdCustomerPo>()
+                        .select(KdCustomerPo::getKdFid, KdCustomerPo::getKdNumber)
+                        .eq(ownerUserId != null, KdCustomerPo::getOwnerUserId, ownerUserId)
+                        .eq(KdCustomerPo::getAcctId, entry.getKey())
+                        .in(KdCustomerPo::getKdFid, chunk));
+                for (KdCustomerPo po : list) {
+                    if (po.getKdNumber() != null && !po.getKdNumber().isBlank()) {
+                        result.put(entry.getKey() + "|" + po.getKdFid(), po.getKdNumber());
+                    }
+                }
+            }
+        }
+        return result;
     }
 }

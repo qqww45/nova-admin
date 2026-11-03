@@ -234,7 +234,8 @@ function handleSearch(): void {
 }
 
 const columns: ProTableColumn[] = [
-  { prop: 'customerName', label: '客户', minWidth: 220, showOverflowTooltip: true },
+  { prop: 'customerName', label: '客户', minWidth: 200, showOverflowTooltip: true },
+  { prop: 'customerNumber', label: '客户编码', width: 120, showOverflowTooltip: true },
   { prop: 'acctId', label: '账套', width: 140, showOverflowTooltip: true },
   { prop: 'billCount', label: '出库单数', width: 100, align: 'right' },
   { prop: 'totalAmount', label: '金额合计', width: 150, align: 'right', slot: true },
@@ -263,8 +264,11 @@ function handleReset(): void {
  */
 async function copySummaryAsText(row: KdStatementSummaryResp): Promise<void> {
   const range = row.firstDate && row.lastDate ? `${row.firstDate} ~ ${row.lastDate}` : '本期';
+  const namePart = row.customerNumber
+    ? `${row.customerName || '客户'}（编码 ${row.customerNumber}）`
+    : row.customerName || '客户';
   const text =
-    `【${row.customerName || '客户'}】${range} 出库 ${row.billCount} 单，合计金额 ¥${money(row.totalAmount)}` +
+    `【${namePart}】${range} 出库 ${row.billCount} 单，合计金额 ¥${money(row.totalAmount)}` +
     (row.acctId ? `（账套 ${row.acctId}）` : '');
   try {
     await navigator.clipboard.writeText(text);

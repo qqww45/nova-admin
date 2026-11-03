@@ -5,6 +5,7 @@ import com.example.admin.domain.model.kd.KdOutboundLine;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 对账取数仓储（只读）。
@@ -61,4 +62,13 @@ public interface KdStatementRepository {
      */
     List<KdOutbound> listAllBillsIncludingExcluded(Long ownerUserId, String acctId,
                                                    LocalDateTime from, LocalDateTime to);
+
+    /**
+     * 按单据批量取金蝶客户编码（客户重名时靠编码识别，防串户）。
+     *
+     * @param ownerUserId 数据归属人；null 表示不限（管理员）
+     * @param bills 单据列表（取其 acctId + customerFid）
+     * @return key = {@code 账套|客户内码} → 客户编码；查不到的编码不在结果里
+     */
+    Map<String, String> findCustomerNumbers(Long ownerUserId, List<KdOutbound> bills);
 }

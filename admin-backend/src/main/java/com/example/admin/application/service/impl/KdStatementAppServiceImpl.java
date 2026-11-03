@@ -86,6 +86,9 @@ public class KdStatementAppServiceImpl implements KdStatementAppService {
         // key = acctId|kdFid：不同账套的客户内码会冲突
         Map<String, KdStatementSummaryResp> grouped = new LinkedHashMap<>();
         Map<String, BigDecimal> amounts = new LinkedHashMap<>();
+        // 客户编码：客户重名时靠编码识别（防串户），一次批量取回
+        Map<String, String> customerNumbers = statementRepository.findCustomerNumbers(
+                scope.ownerUserId(), bills);
         String keyword = trimToNull(query.getKeyword());
 
         for (KdOutbound bill : bills) {
@@ -118,6 +121,9 @@ public class KdStatementAppServiceImpl implements KdStatementAppService {
 
         List<KdStatementSummaryResp> rows = new ArrayList<>(grouped.values());
         rows.forEach(r -> r.setTotalAmount(amounts.get(keyOf(r.getAcctId(),
+                IdParser.parseIdOrNull(r.getCustomerFid())))));
+        // 汇总行回填客户编码（与金额同 key：账套 + 客户内码）
+        rows.forEach(r -> r.setCustomerNumber(customerNumbers.get(keyOf(r.getAcctId(),
                 IdParser.parseIdOrNull(r.getCustomerFid())))));
         if (keyword != null) {
             String lower = keyword.toLowerCase();
@@ -169,6 +175,8 @@ public class KdStatementAppServiceImpl implements KdStatementAppService {
         resp.setTotalAmount(total);
         resp.setAcctId(bills.isEmpty() ? scope.acctId() : bills.get(0).getAcctId());
         resp.setCustomerName(bills.isEmpty() ? null : bills.get(0).getCustomerName());
+        resp.setCustomerNumber(statementRepository.findCustomerNumbers(scope.ownerUserId(), bills)
+                .get(keyOf(resp.getAcctId(), customerFid)));
         return resp;
     }
 
@@ -187,6 +195,9 @@ public class KdStatementAppServiceImpl implements KdStatementAppService {
         Map<String, Integer> countByKey = new LinkedHashMap<>();
         Map<String, String> nameByKey = new LinkedHashMap<>();
         Map<String, String> acctByKey = new LinkedHashMap<>();
+        // 客户编码：客户重名时靠编码识别（防串户）
+        Map<String, String> numberByKey = statementRepository.findCustomerNumbers(
+                scope.ownerUserId(), bills);
         for (int i = 0; i < bills.size(); i++) {
             KdOutbound bill = bills.get(i);
             String key = keyOf(bill.getAcctId(), bill.getCustomerFid());
@@ -196,19 +207,20 @@ public class KdStatementAppServiceImpl implements KdStatementAppService {
             acctByKey.putIfAbsent(key, bill.getAcctId());
         }
 
-        List<String> summaryHeader = List.of("账套", "客户名称", "单据数", "金额合计");
+        List<String> summaryHeader = List.of("账套", "客户编码", "客户名称", "单据数", "金额合计");
         List<List<String>> summaryRows = new ArrayList<>();
         for (Map.Entry<String, Integer> entry : countByKey.entrySet()) {
             summaryRows.add(List.of(
                     nullToEmpty(acctByKey.get(entry.getKey())),
+                    nullToEmpty(numberByKey.get(entry.getKey())),
                     nullToEmpty(nameByKey.get(entry.getKey())),
                     String.valueOf(entry.getValue()),
                     money(amountByKey.get(entry.getKey()))));
         }
-        summaryRows.add(List.of("合计", "", String.valueOf(bills.size()),
+        summaryRows.add(List.of("合计", "", "", String.valueOf(bills.size()),
                 money(sumAmount(amountByKey, countByKey.keySet()))));
 
-        List<String> detailHeader = List.of("客户名称", "出库单号", "业务日期", "物料编码", "物料名称",
+        List<String> detailHeader = List.of("客户编码", "客户名称", "出库单号", "业务日期", "物料编码", "物料名称",
                 "规格型号", "单位", "数量", "单价", "金额", "源单编号", "客户PO", "备注");
         List<List<String>> detailRows = new ArrayList<>();
         // 先数清本期分录总数（截断后仍要知道"一共多少行"，不能边截断边数）
@@ -218,7 +230,11 @@ public class KdStatementAppServiceImpl implements KdStatementAppService {
         }
         boolean truncated = false;
         outer:
-        for (KdStatementBillResp bill : detailBills) {
+        for (int i = 0; i < detailBills.size(); i++) {
+            KdStatementBillResp bill = detailBills.get(i);
+            // buildBills 与 bills 保序，按下标回查「账套 + 客户内码」对应的编码
+            String customerNumber = numberByKey.get(
+                    keyOf(bills.get(i).getAcctId(), bills.get(i).getCustomerFid()));
             for (KdStatementLineResp line : bill.getLines()) {
                 if (detailRows.size() >= EXPORT_MAX_LINES) {
                     // 对账单是给业务员和客户核数的依据，静默截断会让"导出文件"
@@ -227,6 +243,7 @@ public class KdStatementAppServiceImpl implements KdStatementAppService {
                     break outer;
                 }
                 detailRows.add(List.of(
+                        nullToEmpty(customerNumber),
                         nullToEmpty(bill.getCustomerName()),
                         nullToEmpty(bill.getBillNo()),
                         nullToEmpty(bill.getBizDate()),
@@ -244,8 +261,12 @@ public class KdStatementAppServiceImpl implements KdStatementAppService {
         }
         if (detailRows.isEmpty()) {
             // 没有分录时导出单据级明细，避免"导出空表"
-            for (KdStatementBillResp bill : detailBills) {
-                detailRows.add(List.of(nullToEmpty(bill.getCustomerName()), nullToEmpty(bill.getBillNo()),
+            for (int i = 0; i < detailBills.size(); i++) {
+                KdStatementBillResp bill = detailBills.get(i);
+                detailRows.add(List.of(
+                        nullToEmpty(numberByKey.get(keyOf(bills.get(i).getAcctId(),
+                                bills.get(i).getCustomerFid()))),
+                        nullToEmpty(bill.getCustomerName()), nullToEmpty(bill.getBillNo()),
                         nullToEmpty(bill.getBizDate()), "", "", "", "", "", "",
                         money(bill.getAmount()), "", "", "（该单无分录数据）"));
             }
@@ -257,7 +278,7 @@ public class KdStatementAppServiceImpl implements KdStatementAppService {
                     EXPORT_MAX_LINES, totalLines)));
         }
         if (truncated) {
-            summaryRows.add(List.of("说明", String.format(
+            summaryRows.add(List.of("说明", "", String.format(
                     "出库明细超出单次导出上限，仅含前 %d 行（本期分录共 %d 行）",
                     EXPORT_MAX_LINES, totalLines), "", ""));
         }

@@ -146,6 +146,8 @@ export interface KdStatementSummaryResp {
   acctId?: string;
   customerFid?: string;
   customerName?: string;
+  /** 金蝶客户编码（重名客户识别用） */
+  customerNumber?: string;
   billCount: number;
   /** 元 */
   totalAmount: number;
