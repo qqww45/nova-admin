@@ -45,3 +45,26 @@ services:
       options:
         max-size: "20m"
         max-file: "5"
+
+  # 桌面端「衡账」自动更新发布源：release-desktop.yml 把 latest.yml / 安装包 / blockmap
+  # 上传到 ./release/，客户端 electron-updater 只读（generic provider）。
+  # 前面建议挂 EdgeOne 加速域名（如 https://hz-release.s.ci64.com ，回源本机 8081）；
+  # latest.yml 缓存 TTL 要设 0 或极短，否则客户端看不到新版本。
+  update:
+    image: nginx:1.27-alpine
+    container_name: nova-admin-update
+    restart: unless-stopped
+    ports:
+      - "${UPDATE_PORT:-8081}:80"
+    volumes:
+      - ./release:/usr/share/nginx/html:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:80/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"

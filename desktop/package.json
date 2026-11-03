@@ -57,13 +57,12 @@
     ],
     "publish": [
       {
-        "provider": "github",
-        "owner": "qqww45",
-        "repo": "nova-admin",
-        "releaseType": "release"
+        "provider": "generic",
+        "url": "https://hz-release.s.ci64.com/"
       }
     ],
     "win": {
+      "artifactName": "hengzhang-setup-${version}.${ext}",
       "target": [
         "nsis"
       ],
