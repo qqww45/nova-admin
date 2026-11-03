@@ -23,6 +23,18 @@
     </el-alert>
 
     <ProTable
+      v-if="!isMobile"
+      :columns="columns"
+      :data="list"
+      :total="total"
+      :loading="loading"
+      :page-num="pageNum"
+      :page-size="pageSize"
+      column-drag
+      column-drag-key="kd:statement"
+      @page-change="onPageChange"
+      @size-change="onSizeChange"
+    >
       :columns="columns"
       :data="list"
       :total="total"
@@ -85,7 +97,73 @@
       </template>
     </ProTable>
 
-    <el-drawer v-model="detailVisible" :title="detailTitle" size="70%">
+    <!-- 移动端轻报数（R10）：见客户场景掏手机就能看汇总、复制报数、单客户导出 -->
+    <div v-else v-loading="loading" class="mobile-report">
+      <div class="mobile-report__quick">
+        <el-button
+          v-for="s in dateShortcuts"
+          :key="s.text"
+          size="small"
+          :type="activeQuick === s.text ? 'primary' : 'default'"
+          plain
+          @click="applyQuickRange(s)"
+        >
+          {{ s.text }}
+        </el-button>
+        <el-button size="small" :loading="loading" @click="handleSearch">刷新</el-button>
+      </div>
+
+      <div v-if="!loading && list.length === 0" class="mobile-report__empty">
+        该期间没有出货数据，可切换上方日期范围
+      </div>
+
+      <div
+        v-for="row in list"
+        :key="`${row.acctId}-${row.customerFid}`"
+        class="mobile-report__card"
+      >
+        <div class="mobile-report__row">
+          <span class="mobile-report__name">
+            {{ row.customerName || '客户' }}
+            <span v-if="row.customerNumber" class="mono">({{ row.customerNumber }})</span>
+          </span>
+          <span class="mobile-report__amount money">¥{{ money(row.totalAmount) }}</span>
+        </div>
+        <div class="mobile-report__meta">
+          <span>{{ row.acctId || '—' }}</span>
+          <span>{{ row.billCount }} 单</span>
+          <span class="mono">{{ row.firstDate || '—' }} ~ {{ row.lastDate || '—' }}</span>
+        </div>
+        <div class="mobile-report__actions">
+          <el-button link type="primary" size="small" @click="openDetail(row)">明细</el-button>
+          <el-button link type="primary" size="small" @click="copySummaryAsText(row)">复制报数</el-button>
+          <el-button
+            v-if="canExport"
+            link
+            type="primary"
+            size="small"
+            :loading="exportingDetail"
+            @click="exportCustomer(row.acctId, row.customerFid)"
+          >
+            导出
+          </el-button>
+        </div>
+      </div>
+
+      <el-pagination
+        v-if="total > pageSize"
+        layout="prev, pager, next"
+        :total="total"
+        :page-size="pageSize"
+        :current-page="pageNum"
+        :pager-count="5"
+        small
+        class="mobile-report__pager"
+        @current-change="onPageChange"
+      />
+    </div>
+
+    <el-drawer v-model="detailVisible" :title="detailTitle" :size="isMobile ? '100%' : '70%'">
       <div v-loading="detailLoading" class="detail-body">
         <div class="detail-head">
           <span>出库单 <b>{{ detail?.billCount ?? 0 }}</b> 张</span>
@@ -144,6 +222,7 @@ import { ElMessage } from 'element-plus';
 import ProTable from '@/components/ProTable/index.vue';
 import type { ProTableColumn } from '@/components/ProTable/index.vue';
 import { useTable } from '@/composables/useTable';
+import { useIsMobile } from '@/composables/useIsMobile';
 import { useUserStore } from '@/store/user';
 import { kdStatementApi } from '@/api/kd';
 import type {
@@ -157,6 +236,7 @@ import type {
 
 const userStore = useUserStore();
 const canExport = computed(() => userStore.hasPermission('kd:statement:export'));
+const { isMobile } = useIsMobile();
 
 // el-date-picker 的 daterange + value-format 返回 string[]；清空时是 []
 const dateRange = ref<string[]>([]);
@@ -253,6 +333,7 @@ const detailTitle = computed(() =>
 
 function handleReset(): void {
   dateRange.value = [];
+  activeQuick.value = '';
   searchForm.value = { acctId: '', keyword: '' };
   reset();
   void loadHealth();
@@ -309,18 +390,42 @@ async function handleExport(): Promise<void> {
 /** 业务员最常见的对账动作是"给某一个客户出单"：明细页一键导出，不用回列表拼查询条件 */
 async function exportCurrentCustomer(): Promise<void> {
   if (!detail.value?.customerFid) return;
+  await exportCustomer(detail.value.acctId, detail.value.customerFid);
+}
+
+/** 单客户导出（桌面明细抽屉与移动卡片共用） */
+async function exportCustomer(acctId?: string, customerFid?: string): Promise<void> {
+  if (!customerFid) return;
   exportingDetail.value = true;
   try {
     await kdStatementApi.export({
       ...currentQuery(),
-      acctId: detail.value.acctId || currentQuery().acctId,
-      customerFid: detail.value.customerFid,
+      acctId: acctId || currentQuery().acctId,
+      customerFid,
     });
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : String(e));
   } finally {
     exportingDetail.value = false;
   }
+}
+
+/* ---------------- 移动端快捷日期 ---------------- */
+
+const activeQuick = ref('');
+
+function isQuickActive(text: string): boolean {
+  return activeQuick.value === text;
+}
+
+/** 移动端一键切换常用期间（复用桌面快捷的同一组计算） */
+function applyQuickRange(shortcut: { text: string; value: () => [Date, Date] }): void {
+  const range = shortcut.value();
+  const fmt = (d: Date): string =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  dateRange.value = [fmt(range[0]), fmt(range[1])];
+  activeQuick.value = shortcut.text;
+  handleSearch();
 }
 
 /** 金额统一两位小数；接口返回是 number（元） */
@@ -337,6 +442,77 @@ onMounted(() => {
 <style scoped lang="scss">
 .health-bar {
   margin-bottom: 12px;
+}
+
+/* 移动端轻报数卡片 */
+.mobile-report {
+  &__quick {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+
+  &__empty {
+    padding: 24px 0;
+    font-size: 13px;
+    color: var(--admin-text-secondary);
+    text-align: center;
+  }
+
+  &__card {
+    padding: 12px;
+    margin-bottom: 10px;
+    background: var(--el-fill-color-blank);
+    border: 1px solid var(--el-border-color-lighter);
+    border-radius: 10px;
+  }
+
+  &__row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  &__name {
+    font-size: 14px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+
+    .mono {
+      font-size: 12px;
+      font-weight: 400;
+    }
+  }
+
+  &__amount {
+    font-size: 16px;
+    white-space: nowrap;
+  }
+
+  &__meta {
+    display: flex;
+    gap: 12px;
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--admin-text-secondary);
+  }
+
+  &__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 4px;
+    margin-top: 4px;
+  }
+
+  &__pager {
+    display: flex;
+    justify-content: center;
+    margin-top: 8px;
+  }
 }
 
 .money {
