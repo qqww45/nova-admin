@@ -134,6 +134,23 @@ class KdStatementAppServiceImplTest {
         assertTrue(summaryXml.contains("仅含前 5000 行"), "客户汇总 sheet 也应有截断说明，解释两边数字为何对不上");
     }
 
+    @Test
+    @DisplayName("分录规格型号（spec）必须透传到导出明细 sheet")
+    void exportShouldCarryLineSpec() throws IOException {
+        when(operatorContext.current()).thenReturn(user("admin"));
+        when(statementRepository.listBills(any(), any(), any(), any(), any()))
+                .thenReturn(List.of(bill(5001L, 1001L, "深圳示例客户", "2026-10-10T00:00:00")));
+        KdOutboundLine specLine = line(5001L, 90001L, 123456L);
+        specLine.setSpec("GB/T 1243 套筒滚子链 08B-1");
+        when(statementRepository.listLines(any(), anyList()))
+                .thenReturn(List.of(specLine));
+
+        String xml = sheetXml(service.export(query("2026-10-01", "2026-10-31")), 2);
+
+        assertTrue(xml.contains("GB/T 1243 套筒滚子链 08B-1"),
+                "规格型号应写入导出明细 sheet：" + xml);
+    }
+
     /* ---------------- 工具 ---------------- */
 
     private static KdStatementQuery query(String from, String to) {

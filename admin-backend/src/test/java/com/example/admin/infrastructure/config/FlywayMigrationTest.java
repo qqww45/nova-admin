@@ -61,6 +61,15 @@ class FlywayMigrationTest {
                     rs.next();
                     assertEquals(1, rs.getInt(1), "出库分录任务未被初始化");
                 }
+                // V20：分录任务模板必须含规格字段——采集器把任务清单里的字段集当候选之一，
+                // 模板缺字段则新装采集器可能整条链路采不到「规格型号」，
+                // 服务端 spec 列、对账单导出与数据查看页的该列全为空
+                try (var rs = stmt.executeQuery(
+                        "SELECT field_keys FROM kd_sync_task WHERE acct_id = '*' AND entity = 'outbound_line'")) {
+                    rs.next();
+                    assertTrue(rs.getString(1).contains("FMaterialId.FSpecification"),
+                            "出库分录任务模板应包含规格型号字段 FMaterialId.FSpecification");
+                }
 
                 // 业务员（role_id=3）必须拿到对账单与绑定/批次的查询、导出、指令权限：
                 // V16/V17 只授权给管理员角色时，功能对真正的使用者（业务员）整体不可用
