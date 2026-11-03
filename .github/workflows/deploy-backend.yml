@@ -45,7 +45,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     # 防止在 scp / docker 拉取阶段无限挂起（之前挂过 1 小时）
-    timeout-minutes: 60
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
 
@@ -128,14 +128,14 @@ jobs:
           if timeout 45 ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" "command -v rsync >/dev/null 2>&1"; then
             echo "      服务器有 rsync：断点续传 + 实时进度"
             # shellcheck disable=SC2086
-            if ! timeout 1800 rsync -e "ssh $SSH_OPTS" --partial --inplace --progress $FILES "$SSH_USER@$SSH_HOST:$DIR/"; then
+            if ! { ok=0; for try in 1 2 3 4; do timeout 5400 rsync -e "ssh $SSH_OPTS" --partial --inplace --progress --timeout=120 $FILES "$SSH_USER@$SSH_HOST:$DIR/" && { ok=1; break; }; echo "      rsync 第 $try 次失败，10 秒后续传"; sleep 10; done; [ "$ok" = 1 ]; }; then
               echo "      上传失败或超时（1800s）：请检查服务器磁盘空间与公网带宽" >&2
               exit 1
             fi
           else
             echo "      服务器无 rsync，改用 scp"
             # shellcheck disable=SC2086
-            if ! timeout 1800 scp $SCP_OPTS -o Compression=no $FILES "$SSH_USER@$SSH_HOST:$DIR/"; then
+            if ! { ok=0; for try in 1 2 3 4; do timeout 5400 scp $SCP_OPTS -o Compression=no $FILES "$SSH_USER@$SSH_HOST:$DIR/" && { ok=1; break; }; echo "      scp 第 $try 次失败，10 秒后重试"; sleep 10; done; [ "$ok" = 1 ]; }; then
               echo "      上传失败或超时（1800s）：请检查服务器磁盘空间与公网带宽" >&2
               exit 1
             fi
