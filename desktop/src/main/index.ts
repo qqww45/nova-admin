@@ -6,6 +6,7 @@ import { startCommandLoop, stopCommandLoop } from './nova/commands'
 import { refreshTasks } from './nova/tasks'
 import { closeDb } from './db'
 import { getUserRoots } from './paths'
+import { initTray, markQuitting, stopAutoSync } from './tray'
 
 function isDev() {
   return !app.isPackaged
@@ -60,6 +61,13 @@ app.whenReady().then(() => {
   // 启动即拉一次任务清单：字段集配置可能已被运维改过
   void refreshTasks()
 
+  // 托盘常驻 + 定时同步 + 开机自启（仅打包后；开发模式关窗即退）
+  if (app.isPackaged) {
+    void initTray(() => BrowserWindow.getAllWindows()[0] ?? null)
+    // 业务员电脑重启后采集器自动拉起（方案 §8）；托盘菜单可随时关掉
+    app.setLoginItemSettings({ openAtLogin: true })
+  }
+
   setTimeout(() => {
     if (app.isPackaged) void checkForUpdatesSilent()
   }, 2500)
@@ -74,7 +82,9 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
-// 退出前停掉轮询，避免定时器在 app 销毁后继续发请求
+// 退出前停掉轮询与定时同步，避免定时器在 app 销毁后继续发请求
 app.on('before-quit', () => {
+  markQuitting()
   stopCommandLoop()
+  stopAutoSync()
 })
