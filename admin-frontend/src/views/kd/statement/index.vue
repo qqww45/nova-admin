@@ -56,6 +56,15 @@
         <el-button link type="primary" @click="openDetail(row as KdStatementSummaryResp)">
           查看明细
         </el-button>
+        <el-button
+          v-if="canExport"
+          link
+          type="primary"
+          :loading="exportingRow === (row as KdStatementSummaryResp).customerFid"
+          @click="handleExportRow(row as KdStatementSummaryResp)"
+        >
+          导出
+        </el-button>
       </template>
     </ProTable>
 
@@ -68,6 +77,15 @@
             合计 <b class="money">{{ money(detail?.totalAmount) }}</b>
           </span>
           <span class="cell-sub">{{ detail?.dateFrom }} ~ {{ detail?.dateTo }}</span>
+          <el-button
+            v-if="canExport && detail?.customerFid"
+            type="primary"
+            size="small"
+            :loading="exportingRow === detail?.customerFid"
+            @click="handleExportDetail"
+          >
+            导出对账单
+          </el-button>
         </div>
 
         <el-table :data="detail?.bills ?? []" border size="small" row-key="billNo" default-expand-all>
@@ -145,12 +163,16 @@ const columns: ProTableColumn[] = [
   { prop: 'billCount', label: '出库单数', width: 100, align: 'right' },
   { prop: 'totalAmount', label: '金额合计', width: 150, align: 'right', slot: true },
   { prop: 'period', label: '起 / 止', width: 140, slot: true },
-  { prop: 'actions', label: '操作', width: 100, fixed: 'right', slot: true },
+  { prop: 'actions', label: '操作', width: 140, fixed: 'right', slot: true },
 ];
 
 const detailVisible = ref(false);
 const detailLoading = ref(false);
 const detail = ref<KdStatementDetailResp | null>(null);
+/** 抽屉打开时的汇总行（导出对账单要复用它的客户 + 账套 + 日期条件） */
+const detailRow = ref<KdStatementSummaryResp | null>(null);
+/** 正在导出的客户内码（行内按钮 loading） */
+const exportingRow = ref<string>('');
 const detailTitle = computed(() =>
   detail.value?.customerName ? `对账明细 · ${detail.value.customerName}` : '对账明细',
 );
@@ -165,6 +187,7 @@ async function openDetail(row: KdStatementSummaryResp): Promise<void> {
   detailVisible.value = true;
   detailLoading.value = true;
   detail.value = null;
+  detailRow.value = row;
   try {
     detail.value = await kdStatementApi.detail({
       ...currentQuery(),
@@ -187,6 +210,38 @@ async function handleExport(): Promise<void> {
   } finally {
     exporting.value = false;
   }
+}
+
+/** 文件名里的客户名清洗（与浏览器下载兼容） */
+function exportFileName(customerName?: string | null): string {
+  const range = `${currentQuery().dateFrom || '起'}_${currentQuery().dateTo || '今'}`;
+  const cleaned = (customerName || '客户').replace(/[\\/:*?"<>|\s]/g, '');
+  return `对账单-${cleaned}-${range}.xlsx`;
+}
+
+/** 按汇总行导出该客户对账单（版式与签字样板一致，客户 × 物料分 sheet） */
+async function handleExportRow(row: KdStatementSummaryResp): Promise<void> {
+  exportingRow.value = row.customerFid || '';
+  try {
+    await kdStatementApi.export(
+      {
+        ...currentQuery(),
+        acctId: row.acctId || currentQuery().acctId,
+        customerFid: row.customerFid,
+      },
+      exportFileName(row.customerName),
+    );
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : String(e));
+  } finally {
+    exportingRow.value = '';
+  }
+}
+
+/** 明细抽屉里导出当前客户 */
+async function handleExportDetail(): Promise<void> {
+  if (!detailRow.value) return;
+  await handleExportRow(detailRow.value);
 }
 
 /** 金额统一两位小数；接口返回是 number（元） */

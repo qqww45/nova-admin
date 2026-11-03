@@ -150,8 +150,8 @@ export const kdStatementApi = {
     return http.get<KdStatementDetailResp>('/kd/statement/detail', params);
   },
 
-  /** 导出 xlsx（客户汇总 + 出库明细） */
-  async export(params: KdStatementQuery): Promise<void> {
+  /** 导出 xlsx（不传客户时导出范围内全部客户；版式与签字样板一致） */
+  async export(params: KdStatementQuery, fileName?: string): Promise<void> {
     const response = await http.get<Blob>('/kd/statement/export', params, {
       responseType: 'blob',
       // 全局 20s 超时按"接口响应"设计；导出要服务端算完全部分录再传整份文件，
@@ -160,6 +160,6 @@ export const kdStatementApi = {
       timeout: 120_000,
     } as never);
     const range = `${params.dateFrom || '起'}_${params.dateTo || '今'}`;
-    downloadBlob(response, `金蝶对账单-${range}.xlsx`);
+    downloadBlob(response, fileName || `金蝶对账单-${range}.xlsx`);
   },
 };
