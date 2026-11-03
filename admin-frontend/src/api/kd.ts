@@ -114,6 +114,10 @@ export const kdStatementApi = {
   async export(params: KdStatementQuery): Promise<void> {
     const response = await http.get<Blob>('/kd/statement/export', params, {
       responseType: 'blob',
+      // 全局 20s 超时按"接口响应"设计；导出要服务端算完全部分录再传整份文件，
+      // 慢链路（服务器在国际链路后）下载几 MB 的 xlsx 很容易超过 20s，
+      // 一旦超时前端只弹"网络连接异常"且拿不到文件。这里放宽到 120s。
+      timeout: 120_000,
     } as never);
     const range = `${params.dateFrom || '起'}_${params.dateTo || '今'}`;
     downloadBlob(response, `金蝶对账单-${range}.xlsx`);

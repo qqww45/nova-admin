@@ -8,8 +8,16 @@ import type { CustomerOption, StatementDTO } from '../../../shared/types'
 
 const customers = ref<CustomerOption[]>([])
 const customerFid = ref<number | null>(null)
-const fromMonth = ref(localStorage.getItem('hz.fromMonth') || '2026-03')
-const toMonth = ref(localStorage.getItem('hz.toMonth') || '2026-08')
+// 默认查最近 3 个完整月（含本月）：写死固定年月会在时间推移后默认查到空区间，
+// 业务员误以为"同步坏了"；首次进入仍以 localStorage 记忆优先
+function rollingMonth(offset: number) {
+  const d = new Date()
+  d.setDate(1)
+  d.setMonth(d.getMonth() - offset)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+const fromMonth = ref(localStorage.getItem('hz.fromMonth') || rollingMonth(2))
+const toMonth = ref(localStorage.getItem('hz.toMonth') || rollingMonth(0))
 const activeMonth = ref(0)
 const dto = ref<StatementDTO | null>(null)
 const loading = ref(false)
