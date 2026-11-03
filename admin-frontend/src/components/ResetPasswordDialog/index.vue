@@ -26,6 +26,14 @@ export interface ResetPasswordSubmit {
   newPassword: string;
   /** 旧密码（仅 profile 模式） */
   oldPassword?: string;
+  /**
+   * 确认新密码（两种模式都随 submit 事件上抛）。
+   *
+   * <p>profile 模式必须随请求发给后端（ChangePasswordReq 的 confirmPassword
+   * 为 @NotBlank 必填，且服务端校验两次一致）；admin 模式由调用方决定是否使用
+   * （ResetPasswordReq 只有 userId + password，确认框仅做客户端校验）。
+   */
+  confirmPassword: string;
 }
 
 const props = withDefaults(
@@ -155,6 +163,7 @@ async function onSubmit(): Promise<void> {
     emit('submit', {
       newPassword: form.newPassword,
       oldPassword: props.mode === 'profile' ? form.oldPassword : undefined,
+      confirmPassword: form.confirmPassword,
     });
   } finally {
     submitting.value = false;

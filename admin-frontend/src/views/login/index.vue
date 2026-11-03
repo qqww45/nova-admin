@@ -170,11 +170,18 @@ function messageOf(error: unknown): string {
   return err.code === CODE_CREDENTIAL_ERROR ? CREDENTIAL_ERROR : err.message || '登录失败，请稍后再试';
 }
 
+/**
+ * 登录表单刻意不提供任何演示凭据：不预填、不占位提示、不页面文案。
+ *
+ * <p>此前占位符/提示/预填带内置账号的初始口令，生产构建会泄漏可用凭据；
+ * 现已全部移除（含开发构建——演示账号不再是官方承诺的登录方式，
+ * 本地开发请自行准备测试账号，勿把内置账号当公开入口）。后端
+ * DefaultCredentialGuard 也会在非 dev/staging profile 拒绝内置账号沿用初始口令，
+ * "默认密码"不应存在，登录页自然也不该宣传它。
+ */
 const form = reactive({
-  // 演示账号只在开发环境预填：生产构建若保留默认值，等于把可用凭据写进前端产物，
-  // 且登录页一打开就自动填好了（配合弱口令就是直接可用的入口）。
-  username: import.meta.env.DEV ? 'admin' : '',
-  password: import.meta.env.DEV ? 'admin123' : '',
+  username: '',
+  password: '',
   /** 是否信任此设备：默认勾选 */
   trustDevice: true,
 });
@@ -413,7 +420,7 @@ async function handleLogin(quiet = false): Promise<void> {
           <el-form-item prop="username">
             <el-input
               v-model="form.username"
-              placeholder="用户名：admin"
+              placeholder="请输入用户名"
               autocomplete="username"
               :prefix-icon="'User'"
             />
@@ -424,7 +431,7 @@ async function handleLogin(quiet = false): Promise<void> {
               type="password"
               show-password
               autocomplete="current-password"
-              placeholder="密码：admin123"
+              placeholder="请输入密码"
               :prefix-icon="'Lock'"
             />
           </el-form-item>
@@ -512,8 +519,6 @@ async function handleLogin(quiet = false): Promise<void> {
             {{ challenge ? '请先完成上方验证' : '登 录' }}
           </el-button>
         </el-form>
-
-        <p class="login__tip">演示账号 <code>admin</code> / <code>admin123</code></p>
       </section>
 
       <!-- 右：抽象轨道装饰。纯 CSS、无文字，永不随业务变化 -->
@@ -873,21 +878,6 @@ async function handleLogin(quiet = false): Promise<void> {
   &.is-waiting {
     letter-spacing: 0.12em;
     text-indent: 0.12em;
-  }
-}
-
-.login__tip {
-  margin: 18px 0 0;
-  font-size: 12px;
-  color: var(--admin-text-regular);
-  text-align: center;
-
-  code {
-    padding: 2px 6px;
-    font-size: 12px;
-    color: var(--admin-tag-active-text);
-    background-color: var(--admin-tag-active-bg);
-    border-radius: 4px;
   }
 }
 
