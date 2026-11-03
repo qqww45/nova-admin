@@ -314,7 +314,8 @@ public class KdDataAppServiceImpl implements KdDataAppService {
         resp.setCancelStatus(bill.getCancelStatus());
         resp.setCancelled(bill.getCancelled());
         resp.setAmount(cents(bill.getAmountCents()));
-        resp.setLineCount(lineCounts.get(billKey(bill.getAcctId(), bill.getKdFid())));
+        // 无分录的单据 key 不在统计结果里：统一补 0，前端与导出口径一致
+        resp.setLineCount(lineCounts.getOrDefault(billKey(bill.getAcctId(), bill.getKdFid()), 0));
         resp.setRemark(bill.getRemark());
         resp.setKdModifyTime(bill.getKdModifyTime());
         resp.setInvalid(bill.getInvalid());
