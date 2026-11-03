@@ -57,7 +57,10 @@ public class KdOutboundLineSyncReq {
         @Schema(description = "物料名称")
         private String materialName;
 
-        @Size(max = 300)
+        // 金蝶 FSpecification 是可配置长度的文本字段，真实账套存在超 300 字的规格
+        // （2026-11-03 生产批次整批失败：rows[472].spec 超 300）。上限放宽到 1000，
+        // 与 kd_outbound_line.spec 列宽（V22）保持一致；禁止截断——规格是对账依据。
+        @Size(max = 1000, message = "规格长度不能超过 1000 字")
         @Schema(description = "规格")
         private String spec;
 

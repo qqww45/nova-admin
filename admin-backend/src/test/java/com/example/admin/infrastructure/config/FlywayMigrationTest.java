@@ -19,7 +19,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@code db/migration} 全量跑一遍，至少保证三件事：
  * 语法能过、脚本能按序执行、关键表真的建出来了。
  *
- * <p>不覆盖 prod（MySQL / PostgreSQL）语法差异，那部分仍以部署前的手工验证为准。
+ * <p>不覆盖 prod（MySQL / PostgreSQL）语法差异，那部分仍以部署前的手工验证为准；
+ * 但 V22 起列宽变更走 {@code db/vendor/<库>} 按库分发，这里的 locations
+ * 必须与 application-dev/staging.yml 保持一致（SQLite 走 db/vendor/sqlite），
+ * 锁定 vendor 目录下脚本能被发现并执行（社区版不解析 {vendor} 占位符，须写死路径）。
  *
  * @author admin-system
  * @since 2026-11-02
@@ -33,7 +36,7 @@ class FlywayMigrationTest {
         try {
             Flyway flyway = Flyway.configure()
                     .dataSource("jdbc:sqlite:" + dbFile.toAbsolutePath(), null, null)
-                    .locations("classpath:db/migration")
+                    .locations("classpath:db/migration", "classpath:db/vendor/sqlite")
                     .baselineOnMigrate(true)
                     .validateOnMigrate(true)
                     .load();
@@ -42,8 +45,10 @@ class FlywayMigrationTest {
 
             MigrationInfo[] applied = flyway.info().applied();
             String lastVersion = applied[applied.length - 1].getVersion().getVersion();
-            assertTrue(Integer.parseInt(lastVersion) >= 16,
-                    "金蝶同步迁移（V15/V16）应已执行，实际最后版本：" + lastVersion);
+            // V22：spec 列宽放宽按库分发（SQLite 走 db/vendor/sqlite 空操作），
+            // 应用后最后版本必须推进到 22 —— vendor 目录没配好 / no-op 脚本语法错误都会在这里暴露
+            assertTrue(Integer.parseInt(lastVersion) >= 22,
+                    "spec 列宽放宽迁移（V22）应已执行，实际最后版本：" + lastVersion);
 
                 // 关键表存在性：迁移里写错表名不会报错，只会让运行时"表不存在"
                 try (var conn = java.sql.DriverManager.getConnection("jdbc:sqlite:" + dbFile.toAbsolutePath());
