@@ -7,6 +7,7 @@ import com.example.admin.common.result.R;
 import com.example.admin.interfaces.dto.req.KdBatchPageQuery;
 import com.example.admin.interfaces.dto.req.KdCommandAckReq;
 import com.example.admin.interfaces.dto.req.KdCustomerSyncReq;
+import com.example.admin.interfaces.dto.req.KdMappingUploadReq;
 import com.example.admin.interfaces.dto.req.KdOutboundLineSyncReq;
 import com.example.admin.interfaces.dto.req.KdOutboundSyncReq;
 import com.example.admin.interfaces.dto.req.KdSyncBatchFinishReq;
@@ -127,6 +128,22 @@ public class KdSyncController {
     public R<Void> finishBatch(@PathVariable String batchId,
                                @Valid @RequestBody KdSyncBatchFinishReq req) {
         syncService.finishBatch(batchId, req);
+        return R.ok();
+    }
+
+    /**
+     * 字段自检结果回传（采集器令牌）。
+     *
+     * <p>把自检拼出的分录字段集 / PO 字段写到本绑定的字段映射，
+     * 运维在「金蝶同步 → 同步配置」确认后下发 {@code config.reload} 生效。
+     *
+     * @param req 回传内容
+     * @return 操作结果
+     */
+    @PostMapping("/mapping")
+    @Operation(summary = "字段自检结果回传（采集器令牌）")
+    public R<Void> uploadMapping(@Valid @RequestBody KdMappingUploadReq req) {
+        syncService.uploadMapping(req);
         return R.ok();
     }
 
