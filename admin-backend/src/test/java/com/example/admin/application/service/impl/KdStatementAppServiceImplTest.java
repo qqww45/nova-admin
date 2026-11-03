@@ -1,19 +1,23 @@
 package com.example.admin.application.service.impl;
 
+import com.example.admin.application.service.KdStatementExport;
 import com.example.admin.common.exception.BusinessException;
 import com.example.admin.domain.model.auth.LoginUser;
 import com.example.admin.domain.model.kd.KdOutbound;
 import com.example.admin.domain.model.kd.KdOutboundLine;
 import com.example.admin.domain.port.OperatorContext;
+import com.example.admin.domain.repository.BizUserRepository;
+import com.example.admin.domain.repository.ConfigRepository;
 import com.example.admin.domain.repository.KdStatementRepository;
 import com.example.admin.interfaces.dto.req.KdStatementQuery;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -21,6 +25,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -30,6 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
@@ -42,19 +48,29 @@ import static org.mockito.Mockito.when;
  * <ul>
  *     <li>业务员（非超管）查询必须按本人隔离——方案 §5「所有查询强制带 owner_user_id」；</li>
  *     <li>查询窗口上限 366 天；</li>
- *     <li>导出明细分录超出 5000 行上限时必须显式写截断标记——对账单是核数依据，
+ *     <li>明细查询：金蝶客户内码只在账套内唯一，同内码跨账套必须显式拒绝而不是串户合并；</li>
+ *     <li>导出：金额按「分」存储、按「元」写出；数量 × 单价写公式（模板口径）；
+ *         无分录单据退回表头金额直填；</li>
+ *     <li>导出超过 5000 行必须显式报错——对账单是给客户签字的核数依据，
  *         静默截断会让导出文件与页面汇总对不上且无人察觉；</li>
- *     <li>金额按「分」存储、按「元」导出的换算（cents → 2 位小数）。</li>
+ *     <li>导出文件名：单客户带客户名，多客户用「金蝶对账单」前缀。</li>
  * </ul>
  *
  * @author admin-system
  * @since 2026-11-03
  */
 @ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
 class KdStatementAppServiceImplTest {
 
     @Mock
     private KdStatementRepository statementRepository;
+
+    @Mock
+    private ConfigRepository configRepository;
+
+    @Mock
+    private BizUserRepository bizUserRepository;
 
     @Mock
     private OperatorContext operatorContext;
@@ -71,7 +87,7 @@ class KdStatementAppServiceImplTest {
 
         service.summary(query("2026-10-01", "2026-10-31"));
 
-        ArgumentCaptor<Long> ownerCaptor = ArgumentCaptor.forClass(Long.class);
+        org.mockito.ArgumentCaptor<Long> ownerCaptor = org.mockito.ArgumentCaptor.forClass(Long.class);
         verify(statementRepository).listBills(ownerCaptor.capture(), isNull(),
                 any(), any(), isNull());
         assertEquals(9L, ownerCaptor.getValue(), "业务员只能看到自己上报的数据");
@@ -99,39 +115,110 @@ class KdStatementAppServiceImplTest {
     }
 
     @Test
-    @DisplayName("导出金额必须按分转元换算（123456 分 → 1234.56）")
-    void exportShouldRenderCentsAsYuan() throws IOException {
+    @DisplayName("同客户内码命中多个账套时，明细必须拒绝而不是串户合并")
+    void detailShouldRejectCrossAcctFid() {
         when(operatorContext.current()).thenReturn(user("admin"));
-        when(statementRepository.listBills(any(), any(), any(), any(), any()))
-                .thenReturn(List.of(bill(5001L, 1001L, "深圳示例客户", "2026-10-10T00:00:00")));
-        when(statementRepository.listLines(any(), anyList()))
-                .thenReturn(List.of(line(5001L, 90001L, 123456L)));
+        when(statementRepository.listBills(any(), any(), any(), any(), any())).thenReturn(List.of(
+                bill(5001L, 1001L, "深圳示例客户A", "2026-10-10T00:00:00", "ACCT_A"),
+                bill(5002L, 1001L, "东莞示例客户B", "2026-10-11T00:00:00", "ACCT_B")));
 
-        String xml = sheetXml(service.export(query("2026-10-01", "2026-10-31")), 2);
+        KdStatementQuery query = query("2026-10-01", "2026-10-31");
+        query.setCustomerFid("1001");
 
-        assertTrue(xml.contains("1234.56"), "分 → 元换算结果应出现在明细 sheet：" + xml);
+        BusinessException e = assertThrows(BusinessException.class, () -> service.detail(query));
+        assertTrue(e.getMessage().contains("多个账套"), "应提示指定账套：" + e.getMessage());
     }
 
     @Test
-    @DisplayName("导出明细超 5000 行时必须在两个 sheet 写明截断标记")
-    void exportShouldMarkTruncationWhenLinesExceedCap() throws IOException {
+    @DisplayName("导出：数量/单价按分转元写出，金额列为「数量 × 单价」公式（模板口径）")
+    void exportShouldRenderCentsAsYuanAndFormulaAmount() throws IOException {
         when(operatorContext.current()).thenReturn(user("admin"));
+        when(configRepository.findByKey(anyString())).thenReturn(Optional.empty());
+        when(bizUserRepository.findNames(anyList())).thenReturn(List.of());
         when(statementRepository.listBills(any(), any(), any(), any(), any()))
-                .thenReturn(List.of(bill(5001L, 1001L, "深圳示例客户", "2026-10-10T00:00:00")));
-        // 6000 行（不是 5001）：确认截断后计数不中断，"共 N 行"必须是全量口径
+                .thenReturn(List.of(bill(5001L, 1001L, "深圳示例客户", "2026-10-10T00:00:00", "ACCT_A")));
+        when(statementRepository.listLines(any(), anyList()))
+                .thenReturn(List.of(line(5001L, 90001L, 123456L, 11000L, 43200L)));
+
+        KdStatementExport file = service.export(query("2026-10-01", "2026-10-31"));
+
+        String xml = sheetXml(file.content(), 1);
+        assertTrue(file.fileName().startsWith("对账单-深圳示例客户-"), "单客户导出应带客户名：" + file.fileName());
+        assertTrue(xml.contains("<v>11</v>"), "数量 11000 milli 应写出为 11：" + xml);
+        assertTrue(xml.contains("<v>432</v>"), "单价 43200 分应写出为 432：" + xml);
+        assertTrue(xml.contains("<f>H8*I8</f>"), "金额列应写「数量 × 单价」公式：" + xml);
+        assertTrue(xml.contains("<f>SUM(J8:J8)</f>"), "页脚货款合计应为 SUM 公式：" + xml);
+        assertTrue(xml.contains("<f>J9-G10</f>"), "应收 = 货款 − 已收：" + xml);
+    }
+
+    @Test
+    @DisplayName("导出：无分录单据退回表头金额直填并标注")
+    void exportShouldFallbackToHeaderAmountWhenNoLines() throws IOException {
+        when(operatorContext.current()).thenReturn(user("admin"));
+        when(configRepository.findByKey(anyString())).thenReturn(Optional.empty());
+        when(bizUserRepository.findNames(anyList())).thenReturn(List.of());
+        // 单据头金额 123456 分 → 1234.56 元；无分录时 J 列直填值而不是公式
+        KdOutbound bill = bill(5001L, 1001L, "深圳示例客户", "2026-10-10T00:00:00", "ACCT_A");
+        bill.setAmountCents(123456L);
+        when(statementRepository.listBills(any(), any(), any(), any(), any()))
+                .thenReturn(List.of(bill));
+        when(statementRepository.listLines(any(), anyList())).thenReturn(List.of());
+
+        String xml = sheetXml(service.export(query("2026-10-01", "2026-10-31")).content(), 1);
+
+        assertTrue(xml.contains("<v>1234.56</v>"), "无分录单据金额应直填 1234.56 元：" + xml);
+        assertTrue(xml.contains("（该单无分录数据）"), "无分录单据应标注说明：" + xml);
+    }
+
+    @Test
+    @DisplayName("导出：多个客户按物料分组拆 sheet，物料号作 sheet 名")
+    void exportShouldSplitSheetsByCustomerAndMaterial() throws IOException {
+        when(operatorContext.current()).thenReturn(user("admin"));
+        when(configRepository.findByKey(anyString())).thenReturn(Optional.empty());
+        when(bizUserRepository.findNames(anyList())).thenReturn(List.of());
+        when(statementRepository.listBills(any(), any(), any(), any(), any())).thenReturn(List.of(
+                bill(5001L, 1001L, "深圳示例客户", "2026-10-10T00:00:00", "ACCT_A"),
+                bill(5002L, 2002L, "东莞示例客户", "2026-10-11T00:00:00", "ACCT_A")));
+        when(statementRepository.listLines(any(), anyList())).thenReturn(List.of(
+                line(5001L, 90001L, 100L, 1000L, 100L, "MAT-A"),
+                line(5002L, 90002L, 100L, 1000L, 100L, "MAT-B")));
+
+        KdStatementExport file = service.export(query("2026-10-01", "2026-10-31"));
+
+        String workbook = part(file.content(), "xl/workbook.xml");
+        assertTrue(workbook.contains("MAT-A"), "sheet 应按物料命名：" + workbook);
+        assertTrue(workbook.contains("MAT-B"), "sheet 应按物料命名：" + workbook);
+        assertTrue(file.fileName().startsWith("金蝶对账单-"), "多客户导出用通用前缀：" + file.fileName());
+    }
+
+    @Test
+    @DisplayName("导出：超过 5000 行必须显式报错，绝不静默截断")
+    void exportShouldRejectWhenLinesExceedCap() {
+        when(operatorContext.current()).thenReturn(user("admin"));
+        when(configRepository.findByKey(anyString())).thenReturn(Optional.empty());
+        when(bizUserRepository.findNames(anyList())).thenReturn(List.of());
+        when(statementRepository.listBills(any(), any(), any(), any(), any()))
+                .thenReturn(List.of(bill(5001L, 1001L, "深圳示例客户", "2026-10-10T00:00:00", "ACCT_A")));
+        // 6000 行：报错信息必须是全量口径（6000），而不是停在 5000
         List<KdOutboundLine> lines = new ArrayList<>();
         for (long i = 1; i <= 6000; i++) {
-            lines.add(line(5001L, i, 100L));
+            lines.add(line(5001L, i, 100L, 1000L, 100L));
         }
         when(statementRepository.listLines(any(), anyList())).thenReturn(lines);
 
-        byte[] bytes = service.export(query("2026-10-01", "2026-10-31"));
+        BusinessException e = assertThrows(BusinessException.class,
+                () -> service.export(query("2026-10-01", "2026-10-31")));
+        assertTrue(e.getMessage().contains("共 6000 行"), "报错应说明全量行数：" + e.getMessage());
+        assertTrue(e.getMessage().contains("5000"), "报错应说明上限：" + e.getMessage());
+    }
 
-        String detailXml = sheetXml(bytes, 2);
-        String summaryXml = sheetXml(bytes, 1);
-        assertTrue(detailXml.contains("导出已达 5000 行上限"), "明细 sheet 应写明截断原因");
-        assertTrue(detailXml.contains("本期分录共 6000 行"), "截断后仍应统计全量行数，而不是停在第 5001 行");
-        assertTrue(summaryXml.contains("仅含前 5000 行"), "客户汇总 sheet 也应有截断说明，解释两边数字为何对不上");
+    @Test
+    @DisplayName("导出：范围内无数据必须报错，不生成空对账单")
+    void exportShouldRejectWhenNoData() {
+        when(operatorContext.current()).thenReturn(user("admin"));
+        when(statementRepository.listBills(any(), any(), any(), any(), any())).thenReturn(List.of());
+
+        assertThrows(BusinessException.class, () -> service.export(query("2026-10-01", "2026-10-31")));
     }
 
     /* ---------------- 工具 ---------------- */
@@ -146,14 +233,16 @@ class KdStatementAppServiceImplTest {
     private static LoginUser user(String roleKey) {
         LoginUser user = new LoginUser();
         user.setUserId(9L);
+        user.setNickname("测试用户");
         user.setRoles(Set.of(roleKey));
         return user;
     }
 
-    private static KdOutbound bill(Long fid, Long customerFid, String customerName, String bizDate) {
+    private static KdOutbound bill(Long fid, Long customerFid, String customerName, String bizDate, String acctId) {
         KdOutbound bill = new KdOutbound();
-        bill.setAcctId("ACCT_A");
+        bill.setAcctId(acctId);
         bill.setKdFid(fid);
+        bill.setOwnerUserId(9L);
         bill.setCustomerFid(customerFid);
         bill.setCustomerName(customerName);
         bill.setBillNo("OUT-" + fid);
@@ -164,31 +253,43 @@ class KdStatementAppServiceImplTest {
         return bill;
     }
 
-    private static KdOutboundLine line(Long outboundFid, Long entryId, Long amountCents) {
+    private static KdOutboundLine line(Long outboundFid, Long entryId, Long amountCents,
+                                       Long qtyMilli, Long priceCents) {
+        return line(outboundFid, entryId, amountCents, qtyMilli, priceCents, "MAT-1");
+    }
+
+    private static KdOutboundLine line(Long outboundFid, Long entryId, Long amountCents,
+                                       Long qtyMilli, Long priceCents, String materialNumber) {
         KdOutboundLine line = new KdOutboundLine();
         line.setAcctId("ACCT_A");
         line.setOutboundFid(outboundFid);
         line.setEntryId(entryId);
-        line.setMaterialNumber("M" + entryId);
+        line.setMaterialNumber(materialNumber);
         line.setMaterialName("物料" + entryId);
-        line.setUnit("PCS");
-        line.setQtyMilli(1000L);
-        line.setPriceCents(100L);
+        line.setSpec("规格" + entryId);
+        line.setUnit("pcs");
+        line.setQtyMilli(qtyMilli);
+        line.setPriceCents(priceCents);
         line.setAmountCents(amountCents);
         line.setInvalid(0);
         return line;
     }
 
-    /** 取第 n 个 sheet 的 XML 文本（1 起） */
-    private static String sheetXml(byte[] xlsxBytes, int sheetNo) throws IOException {
+    /** 取 zip 里的指定零件文本 */
+    private static String part(byte[] xlsxBytes, String name) throws IOException {
         try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(xlsxBytes))) {
             ZipEntry entry;
             while ((entry = zip.getNextEntry()) != null) {
-                if (entry.getName().equals("xl/worksheets/sheet" + sheetNo + ".xml")) {
+                if (entry.getName().equals(name)) {
                     return new String(zip.readAllBytes(), StandardCharsets.UTF_8);
                 }
             }
         }
-        throw new IOException("sheet" + sheetNo + " 不存在");
+        throw new IOException(name + " 不存在");
+    }
+
+    /** 取第 n 个 sheet 的 XML 文本（1 起） */
+    private static String sheetXml(byte[] xlsxBytes, int sheetNo) throws IOException {
+        return part(xlsxBytes, "xl/worksheets/sheet" + sheetNo + ".xml");
     }
 }

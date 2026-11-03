@@ -1,5 +1,6 @@
 package com.example.admin.domain.repository;
 
+import com.example.admin.domain.model.kd.KdCustomer;
 import com.example.admin.domain.model.kd.KdOutbound;
 import com.example.admin.domain.model.kd.KdOutboundLine;
 
@@ -46,4 +47,17 @@ public interface KdStatementRepository {
      * @return 分录列表（按单据 + 分录内码排序）
      */
     List<KdOutboundLine> listLines(Long ownerUserId, List<KdOutbound> bills);
+
+    /**
+     * 取客户主数据（含禁用行）。
+     *
+     * <p>对账单抬头需要客户地址；金蝶客户内码只在账套内唯一，必须同时限定账套。
+     * 不过滤禁用行：客户被禁用前的历史出库仍要对账，抬头信息不能因此丢失。
+     *
+     * @param ownerUserId 数据归属人；null 表示不限（管理员）
+     * @param acctId 账套
+     * @param customerFid 金蝶客户内码
+     * @return 客户；不存在返回 null
+     */
+    KdCustomer findCustomer(Long ownerUserId, String acctId, Long customerFid);
 }
