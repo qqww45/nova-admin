@@ -25,9 +25,13 @@ spring:
       auto-commit: true
 
   ## 数据库迁移：生产同样由 Flyway 自动执行，禁止手工改表
+  ## db/vendor/<库>：列宽变更等 DDL 各库语法不同时按库分发（V22 起）。
+  ## 注意：Flyway 社区版不解析 {vendor} 占位符（Teams 功能），必须写死到具体库目录；
+  ## 本 profile 默认 MySQL。若切换 PostgreSQL，须同步把这里改为 db/vendor/postgresql
+  ##（driver-class-name 与 url 一并调整）。
   flyway:
     enabled: true
-    locations: classpath:db/migration
+    locations: classpath:db/migration,classpath:db/vendor/mysql
     baseline-on-migrate: true
     # 生产开启校验：迁移脚本被篡改时立即失败，避免静默跳过
     validate-on-migrate: true
