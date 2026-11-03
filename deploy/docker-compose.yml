@@ -6,8 +6,27 @@
 #     ├── Dockerfile
 #     ├── admin-backend.jar   # CI 上传
 #     ├── .env                # 只存在于服务器，不入库
-#     ├── data/               # SQLite（admin.db）
+#     ├── data/               # 数据卷（prod+MySQL 时不再使用，仅历史 SQLite 过渡用）
 #     └── logs/               # 应用日志
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# 安全默认值：本文件与 Dockerfile 的 profile 默认均为 prod（不再是 staging）。
+# prod profile 会启用启动期安全守卫，配置不达标时【拒绝启动】而不是带病运行：
+#   - VerifyConfigGuard：验证码回传（reveal-code）必须关闭、通道必须为 email、
+#     邮件三项（MAIL_HOST / MAIL_USERNAME / MAIL_PASSWORD）必须配齐；
+#   - DefaultCredentialGuard：内置账号（admin/manager/test）仍用初始口令时拒绝启动；
+#   - JwtSecretGuard：JWT_SECRET 必须注入且不得为默认/弱密钥；
+#   - CacheConfigGuard：ADMIN_CACHE_TYPE=redis 时启动即 ping，连不上拒绝启动。
+# 因此切到 prod 前必须在服务器 .env 里配齐：
+#   DB_HOST / DB_PORT / DB_NAME / DB_USERNAME / DB_PASSWORD   （MySQL）
+#   MAIL_HOST / MAIL_PORT / MAIL_USERNAME / MAIL_PASSWORD / MAIL_FROM
+#   JWT_SECRET（48 字节以上随机串，openssl rand -base64 48）
+#   CORS_ALLOWED_ORIGINS（前端域名，逗号分隔，禁止 *）
+#   并提前修改所有内置账号的初始密码（登录后到「个人中心-修改密码」）。
+# 若服务器尚未具备上述条件、仍处过渡期，可在服务器 .env 里【显式】写
+# SPRING_PROFILES_ACTIVE=staging 继续用弱化配置——那是运维的主动选择，
+# 而不是这里的默认值；staging 不得承载真实数据。
+# ─────────────────────────────────────────────────────────────────────────────
 name: nova-admin
 
 services:
@@ -23,9 +42,11 @@ services:
     env_file:
       - .env
     environment:
-      # 过渡环境：SQLite + 内存缓存 + 日志验证码通道
-      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-staging}
+      # 生产默认 prod：安全守卫全部生效（见文件头说明）。
+      # 服务器 .env 中显式设置 SPRING_PROFILES_ACTIVE 可覆盖此默认值。
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
       SERVER_PORT: 8080
+      # SQLite 数据文件路径：仅过渡期（.env 显式选择 staging）时使用；prod 走 MySQL，此值被忽略
       SQLITE_PATH: /app/data/admin.db
       LOG_FILE: /app/logs/admin-backend.log
     ports:

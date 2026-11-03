@@ -8,9 +8,12 @@ FROM ${BASE_IMAGE}
 LABEL org.opencontainers.image.title="nova-admin-backend" \
       org.opencontainers.image.description="NOVA ADMIN 后端服务"
 
+# SPRING_PROFILES_ACTIVE 默认 prod：安全守卫生效；compose environment 与运行时 -e 均可覆盖。
+# 镜像默认值取"最安全"而不是"最方便"：忘配 profile 时落在 prod，
+# 配置不达标会拒绝启动，而不是静默运行在弱化的过渡配置上。
 ENV TZ=Asia/Shanghai \
     LANG=C.UTF-8 \
-    SPRING_PROFILES_ACTIVE=staging \
+    SPRING_PROFILES_ACTIVE=prod \
     JAVA_OPTS="-XX:MaxRAMPercentage=75 -Dfile.encoding=UTF-8 -Duser.timezone=Asia/Shanghai"
 
 WORKDIR /app

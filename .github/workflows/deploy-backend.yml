@@ -73,14 +73,28 @@ jobs:
           # 由 GitHub Actions 生成；服务器上已存在 .env 时不会被覆盖
           JWT_SECRET=${JWT_SECRET}
           CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS}
-          SPRING_PROFILES_ACTIVE=staging
+          # 生产 profile：验证码回传默认关闭、通道默认 email（application-prod.yml），
+          # 启动守卫（Verify/DefaultCredential/JwtSecret/CacheConfigGuard）全部生效。
+          # 配置不达标会拒绝启动——这是刻意的 fail-closed 设计。
+          SPRING_PROFILES_ACTIVE=prod
+          # 单机生产可用内存会话态；多实例部署请删除此行改用 Redis（REDIS_HOST/REDIS_PORT/REDIS_PASSWORD）
           ADMIN_CACHE_TYPE=memory
-          ADMIN_VERIFY_CHANNEL=log
-          ADMIN_VERIFY_REVEAL_CODE=true
+          # ---- 以下为 prod 守卫所需，请在服务器 .env 中补齐后重启 ----
+          # DB_HOST=            # MySQL 地址
+          # DB_NAME=admin_db
+          # DB_USERNAME=
+          # DB_PASSWORD=
+          # MAIL_HOST=          # 如 smtp.qq.com；465 端口走 SSL
+          # MAIL_USERNAME=
+          # MAIL_PASSWORD=      # 多数邮件商填"授权码"而非登录密码
+          # MAIL_FROM=          # 发件人，留空取 MAIL_USERNAME
           ADMIN_VERSION=${ADMIN_VERSION::7}
           BASE_IMAGE=${BASE_IMAGE}
           EOF
-          echo "已生成 .env.deploy（内容不回显）"
+          echo "已生成 .env.deploy（prod profile，含待补齐的 DB/MAIL 注释项）"
+          echo "注意：全新服务器首次部署在 DB/MAIL 配齐并修改内置账号初始密码前，"
+          echo "      后端会因安全守卫拒绝启动（fail-closed）；过渡期可在服务器 .env 显式设置"
+          echo "      SPRING_PROFILES_ACTIVE=staging（弱化配置，仅限内部验收，不得承载真实数据）。"
 
       - name: Upload to server and restart container
         env:

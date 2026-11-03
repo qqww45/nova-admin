@@ -333,7 +333,7 @@ onMounted(async () => {
             v-model="form.password"
             type="password"
             show-password
-            :placeholder="form.id ? '留空表示不修改密码' : '默认密码 admin123'"
+            :placeholder="form.id ? '留空表示不修改密码' : '请输入初始密码（5-20 位）'"
           />
         </el-form-item>
         <el-form-item label="手机号">

@@ -56,9 +56,15 @@ export const userApi = {
     return http.put<void>('/user/profile', data);
   },
 
-  /** 修改密码 */
-  changePassword(oldPassword: string, newPassword: string): Promise<void> {
-    return http.put<void>('/user/profile/password', { oldPassword, newPassword });
+  /**
+   * 修改密码。
+   *
+   * <p>三个字段与后端 ChangePasswordReq 一一对应：oldPassword / newPassword / confirmPassword。
+   * confirmPassword 是服务端必填（@NotBlank + 两次一致性校验）——
+   * 曾经只发 old+new，导致后端返回「确认密码不能为空」而用户明明已填写确认框。
+   */
+  changePassword(oldPassword: string, newPassword: string, confirmPassword: string): Promise<void> {
+    return http.put<void>('/user/profile/password', { oldPassword, newPassword, confirmPassword });
   },
 
   /** 保存主题偏好（跨设备同步） */
