@@ -68,6 +68,11 @@ admin:
     mail:
       from: ${MAIL_FROM:}
       subject-prefix: ${MAIL_SUBJECT_PREFIX:[后台管理系统]}
+  statement-reminder:
+    # 月度对账提醒（试点批 R3）：每月 1 日 08:00 给有邮箱的业务员发上月对账待办
+    # （草稿未签发 / 已签发待客户确认）。服务内部按 sys_config 标记幂等，当天重启不重发。
+    # dev / staging 不开启：邮件通道未配置，定时任务也不该在开发环境跑。
+    enabled: ${ADMIN_STATEMENT_REMINDER:true}
 
 ## ---------------------------- 日志 ----------------------------
 logging:
