@@ -19,7 +19,7 @@
  */
 import { computed, onMounted, onUpdated, ref } from 'vue';
 import type { TableColumnCtx } from 'element-plus';
-import { ArrowDown } from '@element-plus/icons-vue';
+import { ArrowDown, Box } from '@element-plus/icons-vue';
 import { useColumnDrag, type ColumnLike } from '@/composables/useColumnDrag';
 
 /** 列定义：对齐 el-table-column 常用属性，额外支持 slot 名 */
@@ -68,6 +68,12 @@ const props = withDefaults(
     searchCollapsible?: boolean;
     /** 搜索区收起时最多展示的条件数 */
     searchMaxVisible?: number;
+    /** 是否启用行展开（#expand 插槽渲染展开内容） */
+    expandable?: boolean;
+    /** 空态主文案 */
+    emptyText?: string;
+    /** 空态辅助说明（一句话，告诉用户这里为什么没有数据） */
+    emptyDescription?: string;
   }>(),
   {
     total: 0,
@@ -81,6 +87,9 @@ const props = withDefaults(
     columnDragKey: undefined,
     searchCollapsible: true,
     searchMaxVisible: 3,
+    expandable: false,
+    emptyText: '暂无数据',
+    emptyDescription: undefined,
   },
 );
 
@@ -88,6 +97,7 @@ const emit = defineEmits<{
   (e: 'page-change', page: number): void;
   (e: 'size-change', size: number): void;
   (e: 'selection-change', rows: unknown[]): void;
+  (e: 'expand-change', row: unknown, expanded: unknown): void;
 }>();
 
 /**
@@ -100,6 +110,10 @@ defineSlots<{
   toolbar?: () => unknown;
   /** 工具栏右侧元信息（如"共 N 条"）；与「恢复列序」同区，自动避让 */
   'toolbar-meta'?: () => unknown;
+  /** 行展开内容（expandable 开启时渲染在首列） */
+  expand?: (props: { row: unknown }) => unknown;
+  /** 自定义空态（默认是图标 + 文案 + 辅助说明） */
+  empty?: () => unknown;
   columns?: () => unknown;
   [key: `col-${string}`]: (props: { row: unknown }) => unknown;
 }>();
@@ -220,7 +234,14 @@ function onSizeChange(size: number): void {
         :tree-props="tree ? { children: 'children' } : undefined"
         size="default"
         @selection-change="(rows: unknown[]) => emit('selection-change', rows)"
+        @expand-change="(row: unknown, expanded: unknown) => emit('expand-change', row, expanded)"
       >
+        <!-- 行展开：固定在首列，#expand 插槽渲染内容 -->
+        <el-table-column v-if="expandable" type="expand">
+          <template #default="{ row }">
+            <slot name="expand" :row="row" />
+          </template>
+        </el-table-column>
         <el-table-column v-if="selectable" type="selection" width="46" align="center" />
         <el-table-column
           v-for="column in renderColumns"
@@ -241,6 +262,18 @@ function onSizeChange(size: number): void {
         </el-table-column>
         <!-- 操作列固定由页面提供 -->
         <slot name="columns" />
+        <!-- 空态：图标 + 主文案 + 辅助说明，页面可通过 #empty 完全接管 -->
+        <template #empty>
+          <slot name="empty">
+            <div class="pro-table__empty">
+              <el-icon :size="40" class="pro-table__empty-icon">
+                <Box />
+              </el-icon>
+              <p class="pro-table__empty-title">{{ emptyText }}</p>
+              <p v-if="emptyDescription" class="pro-table__empty-desc">{{ emptyDescription }}</p>
+            </div>
+          </slot>
+        </template>
       </el-table>
 
       <!-- 分页：树形表格不需要分页 -->
@@ -296,6 +329,33 @@ function onSizeChange(size: number): void {
   /* 可拖拽换列时，表头给出 move 光标提示 */
   &__table--draggable :deep(thead th.el-table__cell) {
     cursor: move;
+  }
+
+  /* 空态：与"报错"区分开——没有数据是正常状态，克制、低饱和 */
+  &__empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 28px 16px 32px;
+  }
+
+  &__empty-icon {
+    margin-bottom: 8px;
+    color: var(--admin-border-strong);
+  }
+
+  &__empty-title {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--admin-text-regular);
+  }
+
+  &__empty-desc {
+    margin: 0;
+    font-size: 12px;
+    color: var(--admin-text-secondary);
   }
 
   &__pagination {

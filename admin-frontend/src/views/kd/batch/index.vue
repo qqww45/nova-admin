@@ -9,6 +9,7 @@
       :page-size="pageSize"
       column-drag
       column-drag-key="kd:batch"
+      empty-description="暂无同步批次：采集器未启动或未联网，可到「绑定管理」下发「立即同步」验证"
       @page-change="onPageChange"
       @size-change="onSizeChange"
     >
@@ -100,6 +101,7 @@ const { loading, list, total, pageNum, pageSize, reload, reset, onPageChange, on
 const columns: ProTableColumn[] = [
   { prop: 'batchNo', label: '批次号', width: 220, showOverflowTooltip: true },
   { prop: 'acctId', label: '账套', width: 120, showOverflowTooltip: true },
+  { prop: 'ownerUserName', label: '业务员', width: 90, showOverflowTooltip: true },
   { prop: 'entity', label: '实体', width: 120 },
   { prop: 'mode', label: '模式', width: 90 },
   { prop: 'statusLabel', label: '状态', width: 90, slot: true },
