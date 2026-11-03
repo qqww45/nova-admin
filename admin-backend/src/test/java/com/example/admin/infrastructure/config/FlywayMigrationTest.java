@@ -66,8 +66,11 @@ class FlywayMigrationTest {
                 // V16/V17 只授权给管理员角色时，功能对真正的使用者（业务员）整体不可用
                 // ——页面不可达 + 接口 403。此断言锁定 V18 的授权不被后续迁移悄悄拿掉。
                 // 同一 permission 会同时命中菜单行与按钮行（如 44 与 4401），断言 >= 1。
+                // V19 新增的三个数据查看页（客户/出库/分录）同样授权业务员：
+                // 排查"数据为什么没上来"是业务员的自查诉求，断言一并锁定。
                 for (String permission : new String[]{"kd:statement:list", "kd:statement:export",
-                        "kd:binding:list", "kd:binding:code", "kd:binding:command", "kd:sync:list"}) {
+                        "kd:binding:list", "kd:binding:code", "kd:binding:command", "kd:sync:list",
+                        "kd:outbound:list", "kd:customer:list", "kd:line:list"}) {
                     try (var rs = stmt.executeQuery(
                             "SELECT COUNT(*) FROM sys_role_menu rm JOIN sys_menu m ON rm.menu_id = m.id "
                                     + "WHERE rm.role_id = 3 AND m.permission = '" + permission + "'")) {

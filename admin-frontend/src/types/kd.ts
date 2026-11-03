@@ -100,6 +100,7 @@ export interface KdSyncBatchResp {
   batchNo: string;
   bindingId: string;
   ownerUserId: string;
+  ownerUserName?: string;
   acctId: string;
   entity?: string;
   mode?: string;
@@ -202,4 +203,135 @@ export interface KdCommandResp {
   createTime?: string;
   deliverTime?: string;
   doneTime?: string;
+}
+
+/* ============ 同步数据查看（排查页，M5） ============ */
+
+/** 数据归属人（业务员）下拉项 */
+export interface KdOwnerResp {
+  id: string;
+  name: string;
+}
+
+/** 客户数据查询条件 */
+export interface KdCustomerDataQuery {
+  acctId?: string;
+  /** 客户名称 / 金蝶客户编码 */
+  keyword?: string;
+  /** 0 启用 / 1 禁用 */
+  disabled?: number;
+  batchNo?: string;
+  /** yyyy-MM-dd（含） */
+  syncDateFrom?: string;
+  syncDateTo?: string;
+  /** 仅管理员生效 */
+  ownerUserId?: string;
+  pageNum?: number;
+  pageSize?: number;
+}
+
+/** 客户数据行 */
+export interface KdCustomerDataResp {
+  id: string;
+  ownerUserId: string;
+  ownerUserName?: string;
+  acctId: string;
+  kdFid: string;
+  kdNumber?: string;
+  customerName?: string;
+  address?: string;
+  disabled?: number;
+  batchNo?: string;
+  syncAt?: string;
+}
+
+/** 出库单数据查询条件 */
+export interface KdOutboundDataQuery {
+  acctId?: string;
+  /** 单据编号 / 客户名称 */
+  keyword?: string;
+  /** yyyy-MM-dd（含） */
+  dateFrom?: string;
+  dateTo?: string;
+  /** A 创建 / B 审核中 / C 已审核 / D 重新审核 */
+  docStatus?: string;
+  /** 0 正常 / 1 已作废 */
+  cancelled?: number;
+  /** 0 正常 / 1 已失效（全量差集标记） */
+  invalid?: number;
+  batchNo?: string;
+  /** 仅管理员生效 */
+  ownerUserId?: string;
+  pageNum?: number;
+  pageSize?: number;
+}
+
+/** 出库单数据行 */
+export interface KdOutboundDataResp {
+  id: string;
+  ownerUserId: string;
+  ownerUserName?: string;
+  acctId: string;
+  kdFid: string;
+  billNo?: string;
+  bizDate?: string;
+  customerFid?: string;
+  customerName?: string;
+  docStatus?: string;
+  docStatusLabel?: string;
+  cancelStatus?: string;
+  cancelled?: number;
+  /** 元 */
+  amount?: number;
+  /** 0 = 该单无分录数据（对账单退回表头金额） */
+  lineCount?: number;
+  remark?: string;
+  kdModifyTime?: string;
+  invalid?: number;
+  batchNo?: string;
+  syncAt?: string;
+}
+
+/** 出库分录查询条件 */
+export interface KdLineDataQuery {
+  acctId?: string;
+  /** 金蝶出库单 FID */
+  outboundFid?: string;
+  /** 物料编码 / 物料名称 / 源单号 / 客户PO */
+  keyword?: string;
+  /** 0 正常 / 1 已失效 */
+  invalid?: number;
+  batchNo?: string;
+  /** yyyy-MM-dd（含） */
+  syncDateFrom?: string;
+  syncDateTo?: string;
+  /** 仅管理员生效 */
+  ownerUserId?: string;
+  pageNum?: number;
+  pageSize?: number;
+}
+
+/** 出库分录数据行 */
+export interface KdOutboundLineDataResp {
+  id: string;
+  ownerUserId: string;
+  ownerUserName?: string;
+  acctId: string;
+  outboundFid: string;
+  /** 服务端按「账套 + FID」回填 */
+  billNo?: string;
+  entryId: string;
+  materialNumber?: string;
+  materialName?: string;
+  spec?: string;
+  unit?: string;
+  qty?: number;
+  price?: number;
+  amount?: number;
+  srcOrderNo?: string;
+  customerPo?: string;
+  remark?: string;
+  invalid?: number;
+  batchNo?: string;
+  syncAt?: string;
 }

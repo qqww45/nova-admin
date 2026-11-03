@@ -259,3 +259,80 @@ div.el-input__wrapper {
   color: var(--admin-menu-active-text);
   box-shadow: var(--admin-shadow-card);
 }
+
+/* ============================================================
+ * 九、数据密度与可读性（产品级表格基线）
+ *
+ * 表头降一档字号、加重字重并拉开字距：与正文形成"表头是结构、
+ * 单元格是内容"的层级；数字列一律等宽数字（tabular-nums），
+ * 金额/数量纵向可对齐比较。
+ * ========================================================== */
+.el-table {
+  font-variant-numeric: tabular-nums;
+}
+
+.el-table .el-table__header-wrapper th.el-table__cell {
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  color: var(--admin-text-secondary);
+}
+
+/* 深层展开行 / 明细表：比主表再紧凑半档 */
+.el-table .el-table__expanded-cell .el-table {
+  font-size: 13px;
+}
+
+/* ============================================================
+ * 十、键盘可达性：焦点环只给键盘用户
+ *
+ * 鼠标点击不显示焦点环（避免"到处是蓝框"），Tab 导航时
+ * 控件轮廓清晰可辨——后台系统同样要对键盘操作友好。
+ * ========================================================== */
+.el-button:focus-visible,
+.el-input__wrapper:focus-within,
+.el-select__wrapper:focus-within,
+.el-checkbox__original:focus-visible + .el-checkbox__inner,
+.el-radio__original:focus-visible + .el-radio__inner {
+  outline: none;
+  box-shadow: var(--admin-focus-ring);
+}
+
+/* ============================================================
+ * 十一、抽屉 / 消息 / 标签：与弹窗同一套圆角与层次
+ * ========================================================== */
+.el-drawer {
+  border-radius: var(--admin-radius-lg) 0 0 var(--admin-radius-lg);
+}
+
+.el-drawer .el-drawer__header {
+  padding: 16px 20px;
+  margin-bottom: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--admin-text-primary);
+  border-bottom: 1px solid var(--admin-dialog-border-color);
+}
+
+.el-drawer .el-drawer__body {
+  padding: 16px 20px;
+}
+
+.el-message {
+  border-radius: var(--admin-radius-base);
+  box-shadow: var(--admin-shadow-card);
+}
+
+.el-notification {
+  border-radius: var(--admin-radius-base);
+  box-shadow: var(--admin-shadow-card);
+}
+
+.el-tag {
+  border-radius: var(--admin-radius-small);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 加载遮罩：轻微背景模糊，让"加载中"不遮死内容轮廓 */
+.el-loading-mask {
+  backdrop-filter: blur(1.5px);
+}

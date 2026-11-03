@@ -6,8 +6,15 @@ import type {
   KdBindingRedeemResp,
   KdBindingResp,
   KdCommandResp,
+  KdCustomerDataQuery,
+  KdCustomerDataResp,
   KdFieldMappingResp,
   KdFieldMappingSaveReq,
+  KdLineDataQuery,
+  KdOutboundDataQuery,
+  KdOutboundDataResp,
+  KdOutboundLineDataResp,
+  KdOwnerResp,
   KdStatementDetailResp,
   KdStatementQuery,
   KdStatementSummaryResp,
@@ -81,6 +88,39 @@ export const kdConfigApi = {
   /** 保存字段映射 */
   saveMapping(data: KdFieldMappingSaveReq): Promise<void> {
     return http.post<void>('/kd/config/mapping', data);
+  },
+};
+
+/**
+ * 金蝶同步数据查看（排查页）。
+ *
+ * <p>只读接口，业务员只见本人数据（服务层强制 ownerUserId 隔离）；
+ * 管理员可跨业务员并显式按业务员过滤。
+ */
+export const kdDataApi = {
+  /** 客户数据分页 */
+  customers(params: KdCustomerDataQuery): Promise<PageResult<KdCustomerDataResp>> {
+    return http.get<PageResult<KdCustomerDataResp>>('/kd/data/customer', params);
+  },
+
+  /** 出库单数据分页（含作废 / 失效行） */
+  outbounds(params: KdOutboundDataQuery): Promise<PageResult<KdOutboundDataResp>> {
+    return http.get<PageResult<KdOutboundDataResp>>('/kd/data/outbound', params);
+  },
+
+  /** 一张出库单的全部分录（列表展开行用，含失效行） */
+  outboundLines(id: string): Promise<KdOutboundLineDataResp[]> {
+    return http.get<KdOutboundLineDataResp[]>(`/kd/data/outbound/${id}/lines`);
+  },
+
+  /** 出库分录跨单检索（物料 / 源单号 / 客户PO / 批次） */
+  lines(params: KdLineDataQuery): Promise<PageResult<KdOutboundLineDataResp>> {
+    return http.get<PageResult<KdOutboundLineDataResp>>('/kd/data/line', params);
+  },
+
+  /** 有采集器绑定的业务员（管理员筛选下拉用） */
+  owners(): Promise<KdOwnerResp[]> {
+    return http.get<KdOwnerResp[]>('/kd/data/owners');
   },
 };
 

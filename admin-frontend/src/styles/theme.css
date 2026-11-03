@@ -40,10 +40,16 @@
   /* 文本与边框 */
   --admin-text-primary: #303133;
   --admin-text-regular: #606266;
+  /* 次要说明文字（表头辅助、时间戳、空态说明）：比 regular 再弱一档，
+     原先 7 个组件引用了它却从未定义，var() 落空后会继承父级颜色，
+     暗色下表现为"辅助文字和正文一样亮"，这里补上真正定义 */
+  --admin-text-secondary: #909399;
   --admin-border-color: #e4e7ed;
   /* 控件（按钮/输入框）描边：比分隔线稍深，保证控件轮廓可辨 */
   --admin-border-strong: #dcdfe6;
   --admin-shadow: 0 1px 4px rgba(0, 21, 41, 0.08);
+  /* 键盘焦点环：仅 :focus-visible 出现，鼠标操作不产生"到处是蓝框"的噪音 */
+  --admin-focus-ring: 0 0 0 2px rgba(37, 99, 235, 0.24);
 
   /* 布局尺寸 */
   --admin-sidebar-width: 220px;
@@ -59,6 +65,7 @@
   /* ---- 全局几何规范 ---- */
   --admin-radius-base: 6px;
   --admin-radius-small: 4px;
+  --admin-radius-lg: 10px;
   --admin-shadow-card: 0 2px 12px rgba(0, 0, 0, 0.08);
 
   /* ---- 侧边栏菜单 ---- */
@@ -137,9 +144,13 @@ html.dark {
 
   --admin-text-primary: #f1f5f9;
   --admin-text-regular: #94a3b8;
+  /* 暗色次要文字：slate-500，比 regular（slate-400）弱一档，
+     保证"主文 → 辅助 → 次要"三级文字层级在深底上仍可分辨 */
+  --admin-text-secondary: #64748b;
   --admin-border-color: #1e293b;
   --admin-border-strong: #2f3b52;
   --admin-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  --admin-focus-ring: 0 0 0 2px rgba(96, 165, 250, 0.32);
 
   /* 暗色下卡片阴影：降低透明度，避免"浮起来"的割裂感 */
   --admin-shadow-card: 0 2px 12px rgba(0, 0, 0, 0.35);
