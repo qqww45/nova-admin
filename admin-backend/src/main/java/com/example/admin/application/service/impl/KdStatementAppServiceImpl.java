@@ -210,10 +210,19 @@ public class KdStatementAppServiceImpl implements KdStatementAppService {
         List<String> detailHeader = List.of("客户名称", "出库单号", "业务日期", "物料编码", "物料名称",
                 "规格型号", "单位", "数量", "单价", "金额", "源单编号", "客户PO", "备注");
         List<List<String>> detailRows = new ArrayList<>();
+        // 先数清本期分录总数（截断后仍要知道"一共多少行"，不能边截断边数）
+        int totalLines = 0;
+        for (KdStatementBillResp bill : detailBills) {
+            totalLines += bill.getLines().size();
+        }
+        boolean truncated = false;
         outer:
         for (KdStatementBillResp bill : detailBills) {
             for (KdStatementLineResp line : bill.getLines()) {
                 if (detailRows.size() >= EXPORT_MAX_LINES) {
+                    // 对账单是给业务员和客户核数的依据，静默截断会让"导出文件"
+                    // 与"页面 / 客户汇总"对不上且无人察觉；这里显式标记截断
+                    truncated = true;
                     break outer;
                 }
                 detailRows.add(List.of(
@@ -239,6 +248,17 @@ public class KdStatementAppServiceImpl implements KdStatementAppService {
                         nullToEmpty(bill.getBizDate()), "", "", "", "", "", "",
                         money(bill.getAmount()), "", "", "（该单无分录数据）"));
             }
+        } else if (truncated) {
+            // 截断标记同时写进两个 sheet：客户汇总是完整口径、出库明细被截断，
+            // 两边数字对不上时业务员能立刻看懂原因，并知道要缩小日期范围分批导出
+            detailRows.add(List.of(String.format(
+                    "（导出已达 %d 行上限，本期分录共 %d 行，明细未完；请缩小日期范围分批导出）",
+                    EXPORT_MAX_LINES, totalLines)));
+        }
+        if (truncated) {
+            summaryRows.add(List.of("说明", String.format(
+                    "出库明细超出单次导出上限，仅含前 %d 行（本期分录共 %d 行）",
+                    EXPORT_MAX_LINES, totalLines), "", ""));
         }
 
         List<XlsxWriter.Sheet> sheets = new ArrayList<>();

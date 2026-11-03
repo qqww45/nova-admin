@@ -61,6 +61,25 @@ class FlywayMigrationTest {
                     rs.next();
                     assertEquals(1, rs.getInt(1), "出库分录任务未被初始化");
                 }
+
+                // 业务员（role_id=3）必须拿到对账单与绑定/批次的查询、导出、指令权限：
+                // V16/V17 只授权给管理员角色时，功能对真正的使用者（业务员）整体不可用
+                // ——页面不可达 + 接口 403。此断言锁定 V18 的授权不被后续迁移悄悄拿掉。
+                // 同一 permission 会同时命中菜单行与按钮行（如 44 与 4401），断言 >= 1。
+                for (String permission : new String[]{"kd:statement:list", "kd:statement:export",
+                        "kd:binding:list", "kd:binding:code", "kd:binding:command", "kd:sync:list"}) {
+                    try (var rs = stmt.executeQuery(
+                            "SELECT COUNT(*) FROM sys_role_menu rm JOIN sys_menu m ON rm.menu_id = m.id "
+                                    + "WHERE rm.role_id = 3 AND m.permission = '" + permission + "'")) {
+                        rs.next();
+                        assertTrue(rs.getInt(1) >= 1, "业务员角色缺少权限：" + permission);
+                    }
+                }
+                try (var rs = stmt.executeQuery(
+                        "SELECT data_scope FROM sys_role WHERE id = 3")) {
+                    rs.next();
+                    assertEquals(4, rs.getInt(1), "业务员角色的数据权限应为「仅本人」");
+                }
             }
         } finally {
             Files.deleteIfExists(dbFile);
