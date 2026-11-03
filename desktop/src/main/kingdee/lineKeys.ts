@@ -25,6 +25,8 @@ export const AMOUNT_CANDIDATES = ['FAllAmount', 'FAmount', 'FTaxAmount']
 export const SRC_CANDIDATES = ['FSrcBillNo', 'FSaleOrderID.FBillNo']
 /** 物料：自检会逐个验证，拼装时取可用项 */
 export const MAT_CANDIDATES = ['FMaterialId.FNumber', 'FMaterialId.FName']
+/** 规格：对账单「规格」列数据源；部分账套不可用，缺失时该列为空 */
+export const SPEC_CANDIDATES = ['FMaterialId.FSpecification', 'FSpecification']
 /** 行备注备选 */
 export const NOTE_CANDIDATES = ['FEntryNote', 'FNote']
 
@@ -37,6 +39,7 @@ export const ENTRY_FIELD_CHECKS = [
   'FMaterialId',
   'FMaterialId.FNumber',
   'FMaterialId.FName',
+  ...SPEC_CANDIDATES,
   ...SRC_CANDIDATES,
   'FSaleOrderID',
   'FEntryNote',
@@ -62,6 +65,7 @@ export function composeLineKeys(valid: Set<string>): string | undefined {
     entryId,
     pick(...MAT_CANDIDATES.slice(0, 1)),
     pick(...MAT_CANDIDATES.slice(1, 2)),
+    pick(...SPEC_CANDIDATES),
     pick('FUnitID.FName', 'FUnitId.FName'),
     qty,
     price,
@@ -72,9 +76,12 @@ export function composeLineKeys(valid: Set<string>): string | undefined {
   return parts.join(',')
 }
 
+/** 物料规格（对账单「规格」列；不可用的账套自动降级到无规格的候选集，该列留空） */
+export const OUT_SPEC = 'FMaterialId.FSpecification'
+
 /** 静态候选集：映射文件里的字段集失败时的兜底（自动降级逐套试） */
 export const LINE_KEY_CANDIDATES = [
-  [OUT_BASE, 'FEntity_FEntryID', OUT_MAT, OUT_UNIT, 'FRealQty,FTaxPrice,FAllAmount', OUT_EXTRA].join(','),
+  [OUT_BASE, 'FEntity_FEntryID', OUT_MAT, OUT_SPEC, OUT_UNIT, 'FRealQty,FTaxPrice,FAllAmount', OUT_EXTRA].join(','),
   [OUT_BASE, 'FEntryID', OUT_MAT, OUT_UNIT, 'FRealQty,FTaxPrice,FAllAmount', OUT_EXTRA].join(','),
   [OUT_BASE, 'FEntity_FEntryID', OUT_MAT, 'FRealQty,FTaxPrice,FAllAmount', OUT_EXTRA].join(','),
   [OUT_BASE, 'FEntity_FEntryID', OUT_MAT, OUT_UNIT, 'FSalQty,FTaxPrice,FAllAmount', OUT_EXTRA].join(','),
