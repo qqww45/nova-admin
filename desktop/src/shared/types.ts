@@ -131,6 +131,13 @@ export interface MappingApplyInput {
   customerPoField?: string
 }
 
+/** 字段自检结果回传（上传到对账平台的 kd_field_mapping） */
+export interface NovaMappingUploadInput {
+  lineFieldKeys?: string
+  customerPoField?: string
+  note?: string
+}
+
 export interface MappingState {
   mapping: OutstockMappingView
   path: string
@@ -167,7 +174,12 @@ export interface SyncProgress {
 }
 
 export interface SyncStartInput {
-  sinceDate: string
+  /**
+   * 显式重拉起点（yyyy-MM-dd）。空 = 自动模式：
+   * 有金蝶修改水位 → 双水位增量（FModifyDate − 15min + 月度 FDate 回看）；
+   * 无水位 → 全量（首次同步）。
+   */
+  sinceDate?: string
 }
 
 export interface LastSyncStat {

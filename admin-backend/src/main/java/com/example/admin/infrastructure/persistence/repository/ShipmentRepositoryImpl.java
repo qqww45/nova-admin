@@ -144,6 +144,14 @@ public class ShipmentRepositoryImpl implements ShipmentRepository {
         return shipmentMapper.selectList(wrapper).stream().map(converter::shipmentToDomain).toList();
     }
 
+    @Override
+    public List<Shipment> listAll() {
+        LambdaQueryWrapper<BizShipment> wrapper = new LambdaQueryWrapper<BizShipment>()
+                .ne(BizShipment::getStatus, ShipmentStatus.VOID.getCode())
+                .orderByAsc(BizShipment::getShipDate);
+        return shipmentMapper.selectList(wrapper).stream().map(converter::shipmentToDomain).toList();
+    }
+
     /**
      * 按查询条件构造通用查询条件（异常池与列表共用）。
      *

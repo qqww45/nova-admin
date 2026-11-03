@@ -7,9 +7,12 @@ import com.example.admin.interfaces.dto.req.ReasonReq;
 import com.example.admin.interfaces.dto.req.StatementGenerateReq;
 import com.example.admin.interfaces.dto.req.StatementPageQuery;
 import com.example.admin.interfaces.dto.req.StatementPreviewReq;
+import com.example.admin.interfaces.dto.resp.ReceivableSummaryResp;
 import com.example.admin.interfaces.dto.resp.StatementPreviewResp;
 import com.example.admin.interfaces.dto.resp.StatementResp;
 import io.swagger.v3.oas.annotations.Operation;
+
+import java.util.List;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
@@ -63,6 +66,21 @@ public class BizStatementController {
     @Operation(summary = "实时预览对账单（不落库）")
     public R<StatementPreviewResp> preview(@Valid @RequestBody StatementPreviewReq req) {
         return R.ok(statementService.preview(req));
+    }
+
+    /**
+     * 客户应收速览（催款优先级）。
+     *
+     * <p>全期间期末应收余额按倒序，最近出货/收款时间标注"欠了多久"。
+     * 权限复用对账单查询，不新增菜单。
+     *
+     * @return 应收速览列表
+     */
+    @GetMapping("/receivable-summary")
+    @PreAuthorize("@ss.hasPermi('biz:statement:list')")
+    @Operation(summary = "客户应收速览", description = "期初 + 累计出货 − 退货 − 累计收款，按余额倒序")
+    public R<List<ReceivableSummaryResp>> receivableSummary() {
+        return R.ok(statementService.receivableSummaries());
     }
 
     @PostMapping

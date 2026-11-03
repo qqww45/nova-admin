@@ -21,6 +21,7 @@ import com.example.admin.infrastructure.excel.StatementXlsxWriter;
 import com.example.admin.interfaces.dto.req.KdStatementQuery;
 import com.example.admin.interfaces.dto.resp.KdStatementBillResp;
 import com.example.admin.interfaces.dto.resp.KdStatementDetailResp;
+import com.example.admin.interfaces.dto.resp.KdStatementHealthResp;
 import com.example.admin.interfaces.dto.resp.KdStatementLineResp;
 import com.example.admin.interfaces.dto.resp.KdStatementSummaryResp;
 import lombok.RequiredArgsConstructor;
@@ -108,6 +109,9 @@ public class KdStatementAppServiceImpl implements KdStatementAppService {
         // key = acctId|kdFid：不同账套的客户内码会冲突
         Map<String, KdStatementSummaryResp> grouped = new LinkedHashMap<>();
         Map<String, BigDecimal> amounts = new LinkedHashMap<>();
+        // 客户编码：客户重名时靠编码识别（防串户），一次批量取回
+        Map<String, String> customerNumbers = statementRepository.findCustomerNumbers(
+                scope.ownerUserId(), bills);
         String keyword = trimToNull(query.getKeyword());
 
         for (KdOutbound bill : bills) {
@@ -140,6 +144,9 @@ public class KdStatementAppServiceImpl implements KdStatementAppService {
 
         List<KdStatementSummaryResp> rows = new ArrayList<>(grouped.values());
         rows.forEach(r -> r.setTotalAmount(amounts.get(keyOf(r.getAcctId(),
+                IdParser.parseIdOrNull(r.getCustomerFid())))));
+        // 汇总行回填客户编码（与金额同 key：账套 + 客户内码）
+        rows.forEach(r -> r.setCustomerNumber(customerNumbers.get(keyOf(r.getAcctId(),
                 IdParser.parseIdOrNull(r.getCustomerFid())))));
         if (keyword != null) {
             String lower = keyword.toLowerCase();
@@ -199,6 +206,8 @@ public class KdStatementAppServiceImpl implements KdStatementAppService {
         resp.setTotalAmount(total);
         resp.setAcctId(bills.isEmpty() ? scope.acctId() : bills.get(0).getAcctId());
         resp.setCustomerName(bills.isEmpty() ? null : bills.get(0).getCustomerName());
+        resp.setCustomerNumber(statementRepository.findCustomerNumbers(scope.ownerUserId(), bills)
+                .get(keyOf(resp.getAcctId(), customerFid)));
         return resp;
     }
 
@@ -324,6 +333,53 @@ public class KdStatementAppServiceImpl implements KdStatementAppService {
         } catch (IOException e) {
             throw new BusinessException("对账单导出失败：" + e.getMessage());
         }
+    }
+
+    @Override
+    public KdStatementHealthResp health(KdStatementQuery query) {
+        Scope scope = scope(query);
+        // 体检口径与对账口径相反：作废 / 失效行必须可见（它们正是差额的来源）
+        List<KdOutbound> all = statementRepository.listAllBillsIncludingExcluded(
+                scope.ownerUserId(), scope.acctId(), scope.from(), scope.toExclusive());
+
+        int billCount = 0;
+        int cancelledCount = 0;
+        int invalidCount = 0;
+        List<KdOutbound> valid = new ArrayList<>(all.size());
+        for (KdOutbound bill : all) {
+            boolean cancelled = bill.getCancelled() != null && bill.getCancelled() == 1;
+            boolean invalid = bill.getInvalid() != null && bill.getInvalid() == 1;
+            if (invalid) {
+                invalidCount++;
+            } else if (cancelled) {
+                cancelledCount++;
+            } else {
+                billCount++;
+                valid.add(bill);
+            }
+        }
+
+        // 无分录 = 有效单里没有一条有效分录：用「账套 + FID」关联（FID 只在账套内唯一）
+        List<KdOutboundLine> lines = statementRepository.listLines(scope.ownerUserId(), valid);
+        java.util.Set<String> withLines = new java.util.HashSet<>();
+        for (KdOutboundLine line : lines) {
+            withLines.add(billKey(line.getAcctId(), line.getOutboundFid()));
+        }
+        int noLineCount = 0;
+        for (KdOutbound bill : valid) {
+            if (!withLines.contains(billKey(bill.getAcctId(), bill.getKdFid()))) {
+                noLineCount++;
+            }
+        }
+
+        KdStatementHealthResp resp = new KdStatementHealthResp();
+        resp.setDateFrom(scope.from().toLocalDate().format(DATE));
+        resp.setDateTo(scope.toExclusive().toLocalDate().minusDays(1).format(DATE));
+        resp.setBillCount(billCount);
+        resp.setNoLineCount(noLineCount);
+        resp.setCancelledCount(cancelledCount);
+        resp.setInvalidCount(invalidCount);
+        return resp;
     }
 
     /** 客户分组（导出中间结构，key = 账套 | 客户内码）。 */

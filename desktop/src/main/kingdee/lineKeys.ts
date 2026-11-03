@@ -25,7 +25,7 @@ export const AMOUNT_CANDIDATES = ['FAllAmount', 'FAmount', 'FTaxAmount']
 export const SRC_CANDIDATES = ['FSrcBillNo', 'FSaleOrderID.FBillNo']
 /** 物料：自检会逐个验证，拼装时取可用项 */
 export const MAT_CANDIDATES = ['FMaterialId.FNumber', 'FMaterialId.FName']
-/** 规格：对账单「规格」列数据源；部分账套不可用，缺失时该列为空 */
+/** 规格：对账单「规格」列数据源；物料基础资料属性为主，部分账套不可用时缺失留空 */
 export const SPEC_CANDIDATES = ['FMaterialId.FSpecification', 'FSpecification']
 /** 行备注备选 */
 export const NOTE_CANDIDATES = ['FEntryNote', 'FNote']
@@ -48,7 +48,8 @@ export const ENTRY_FIELD_CHECKS = [
   'FUnitId.FName',
   ...QTY_CANDIDATES,
   ...PRICE_CANDIDATES,
-  ...AMOUNT_CANDIDATES
+  ...AMOUNT_CANDIDATES,
+  ...SPEC_CANDIDATES
 ]
 
 /** 从「验证通过的字段集合」里按用途各挑一个，拼成完整字段集 */
@@ -81,7 +82,11 @@ export const OUT_SPEC = 'FMaterialId.FSpecification'
 
 /** 静态候选集：映射文件里的字段集失败时的兜底（自动降级逐套试） */
 export const LINE_KEY_CANDIDATES = [
+  // 前两条带规格（物料基础资料属性，绝大多数星空账套可用）；
+  // 账套取不到时整套失败，继续降级到下面不含规格的既有候选，行为与旧版一致
   [OUT_BASE, 'FEntity_FEntryID', OUT_MAT, OUT_SPEC, OUT_UNIT, 'FRealQty,FTaxPrice,FAllAmount', OUT_EXTRA].join(','),
+  [OUT_BASE, 'FEntryID', OUT_MAT, OUT_SPEC, OUT_UNIT, 'FRealQty,FTaxPrice,FAllAmount', OUT_EXTRA].join(','),
+  [OUT_BASE, 'FEntity_FEntryID', OUT_MAT, OUT_UNIT, 'FRealQty,FTaxPrice,FAllAmount', OUT_EXTRA].join(','),
   [OUT_BASE, 'FEntryID', OUT_MAT, OUT_UNIT, 'FRealQty,FTaxPrice,FAllAmount', OUT_EXTRA].join(','),
   [OUT_BASE, 'FEntity_FEntryID', OUT_MAT, 'FRealQty,FTaxPrice,FAllAmount', OUT_EXTRA].join(','),
   [OUT_BASE, 'FEntity_FEntryID', OUT_MAT, OUT_UNIT, 'FSalQty,FTaxPrice,FAllAmount', OUT_EXTRA].join(','),

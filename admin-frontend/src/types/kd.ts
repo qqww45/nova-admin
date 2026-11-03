@@ -146,6 +146,8 @@ export interface KdStatementSummaryResp {
   acctId?: string;
   customerFid?: string;
   customerName?: string;
+  /** 金蝶客户编码（重名客户识别用） */
+  customerNumber?: string;
   billCount: number;
   /** 元 */
   totalAmount: number;
@@ -189,6 +191,53 @@ export interface KdStatementDetailResp {
   lineCount: number;
   totalAmount: number;
   bills: KdStatementBillResp[];
+}
+
+/** 对账单数据体检：解释"本期为什么对账单少数据 / 金额对不上" */
+export interface KdStatementHealthResp {
+  dateFrom?: string;
+  dateTo?: string;
+  /** 有效出库单数（未作废、未失效） */
+  billCount: number;
+  /** 无分录数据的单数（对账单退回表头金额） */
+  noLineCount: number;
+  /** 作废单数 */
+  cancelledCount: number;
+  /** 已失效单数（金蝶侧物理删除） */
+  invalidCount: number;
+  /** 全部健康（无分录/作废/失效均为 0） */
+  healthy: boolean;
+}
+
+/** 金蝶客户 ↔ 内部客户映射行 */
+export interface KdCustomerMappingResp {
+  id: string;
+  acctId: string;
+  kdFid: string;
+  kdNumber?: string;
+  kdName?: string;
+  bizCustomerId?: string;
+  bizCustomerName?: string;
+  /** AUTO_SUGGEST / MANUAL；未匹配为 null */
+  matchType?: string;
+  /** UNMATCHED 未匹配 / SUGGESTED 建议待确认 / CONFIRMED 已确认 */
+  status: string;
+  updateTime?: string;
+}
+
+/** 保存客户映射 */
+export interface KdMappingSaveReq {
+  acctId: string;
+  kdFid: string;
+  bizCustomerId: string;
+  /** 仅管理员代维护时生效 */
+  ownerUserId?: string;
+}
+
+/** 自动匹配建议结果 */
+export interface KdAutoSuggestResult {
+  suggested: number;
+  skipped: number;
 }
 
 /** 采集器指令 */

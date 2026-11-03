@@ -1,6 +1,8 @@
 import { BrowserWindow, ipcMain, shell } from 'electron'
 import { getPublicConfig, saveConfig } from './configStore'
 import { bindNova, novaState, unbindNova, uploadToNova } from './nova/uploader'
+import { uploadMapping } from './nova/client'
+import { getNovaRuntime } from './configStore'
 import { clearTaskCache, refreshTasks } from './nova/tasks'
 import { startCommandLoop, stopCommandLoop } from './nova/commands'
 import { getKingdee } from './kingdee/client'
@@ -117,6 +119,27 @@ export function registerIpc() {
     broadcastNova(result)
     return result
   })
+
+  // 字段自检结果回传：把自检拼出的字段集写到本绑定的服务端字段映射，
+  // 运维在网页上确认后下发 config.reload 生效
+  ipcMain.handle(
+    'nova:uploadMapping',
+    async (
+      _e,
+      input: { lineFieldKeys?: string; customerPoField?: string; note?: string }
+    ): Promise<{ ok: boolean; message: string }> => {
+      const rt = getNovaRuntime()
+      if (!rt.token || !rt.bindingId) {
+        return { ok: false, message: '尚未绑定对账平台，请先在「连接设置」里绑定' }
+      }
+      try {
+        await uploadMapping(rt.baseUrl, rt.token, input)
+        return { ok: true, message: '已上传，运维在「同步配置」确认后即生效' }
+      } catch (e) {
+        return { ok: false, message: e instanceof Error ? e.message : String(e) }
+      }
+    }
+  )
 
   ipcMain.handle('statement:preview', (_e, q: StatementPreviewQuery) =>
     buildStatement(q.customerFid, q.fromMonth, q.toMonth)

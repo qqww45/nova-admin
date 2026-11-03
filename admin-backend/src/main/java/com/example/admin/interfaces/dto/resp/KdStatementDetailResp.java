@@ -26,6 +26,9 @@ public class KdStatementDetailResp {
     @Schema(description = "客户名称")
     private String customerName;
 
+    @Schema(description = "金蝶客户编码（重名客户识别用）")
+    private String customerNumber;
+
     @Schema(description = "查询起日 yyyy-MM-dd")
     private String dateFrom;
 

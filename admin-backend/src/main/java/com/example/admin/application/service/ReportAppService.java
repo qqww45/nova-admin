@@ -2,6 +2,7 @@ package com.example.admin.application.service;
 
 import com.example.admin.interfaces.dto.resp.CustomerSummaryResp;
 import com.example.admin.interfaces.dto.resp.HealthReportResp;
+import com.example.admin.interfaces.dto.resp.OpenOrderItemResp;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -29,4 +30,14 @@ public interface ReportAppService {
      * @return 按客户聚合的汇总列表（按下单总量倒序）
      */
     List<CustomerSummaryResp> customerSummary(LocalDate begin, LocalDate end);
+
+    /**
+     * 催单清单：全部未交订单明细（qtyOpen > 0 且未取消），按客户聚合排序。
+     *
+     * <p>业务员催单的真实动作是"按客户要货"，因此行序先按客户再按下单时间，
+     * 相邻行就是同一客户的待交明细，打印或截图即可去催生产、回复客户。
+     *
+     * @return 未交明细列表
+     */
+    List<OpenOrderItemResp> openItems();
 }

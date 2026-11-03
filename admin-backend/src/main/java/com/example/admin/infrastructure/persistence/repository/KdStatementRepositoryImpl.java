@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * 对账取数仓储实现。
@@ -96,5 +97,52 @@ public class KdStatementRepositoryImpl implements KdStatementRepository {
                 .orderByDesc(KdCustomerPo::getSyncAt)
                 .last("LIMIT 1"));
         return po == null ? null : converter.customerToDomain(po);
+    }
+
+    @Override
+    public List<KdOutbound> listAllBillsIncludingExcluded(Long ownerUserId, String acctId,
+                                                           LocalDateTime from, LocalDateTime to) {
+        LambdaQueryWrapper<KdOutboundPo> wrapper = new LambdaQueryWrapper<KdOutboundPo>()
+                // 体检口径：不过滤 invalid / cancelled——它们正是要暴露的问题行
+                .eq(ownerUserId != null, KdOutboundPo::getOwnerUserId, ownerUserId)
+                .eq(acctId != null && !acctId.isBlank(), KdOutboundPo::getAcctId, acctId)
+                .ge(from != null, KdOutboundPo::getBizDate, from)
+                .lt(to != null, KdOutboundPo::getBizDate, to)
+                .orderByAsc(KdOutboundPo::getBizDate)
+                .orderByAsc(KdOutboundPo::getBillNo);
+        return outboundMapper.selectList(wrapper).stream().map(converter::outboundToDomain).toList();
+    }
+
+    @Override
+    public Map<String, String> findCustomerNumbers(Long ownerUserId, List<KdOutbound> bills) {
+        if (bills == null || bills.isEmpty()) {
+            return Map.of();
+        }
+        // 金蝶客户内码只在账套内唯一：与取数一致，必须按账套分组过滤
+        Map<String, List<Long>> fidsByAcct = new LinkedHashMap<>();
+        for (KdOutbound bill : bills) {
+            String acct = bill.getAcctId() == null ? "" : bill.getAcctId();
+            fidsByAcct.computeIfAbsent(acct, k -> new ArrayList<>()).add(bill.getCustomerFid());
+        }
+        Map<String, String> result = new LinkedHashMap<>();
+        for (Map.Entry<String, List<Long>> entry : fidsByAcct.entrySet()) {
+            List<Long> fids = entry.getValue().stream().filter(Objects::nonNull).distinct().toList();
+            for (List<Long> chunk : ListUtil.partition(fids, IN_CHUNK)) {
+                if (chunk.isEmpty()) {
+                    continue;
+                }
+                List<KdCustomerPo> list = customerMapper.selectList(new LambdaQueryWrapper<KdCustomerPo>()
+                        .select(KdCustomerPo::getKdFid, KdCustomerPo::getKdNumber)
+                        .eq(ownerUserId != null, KdCustomerPo::getOwnerUserId, ownerUserId)
+                        .eq(KdCustomerPo::getAcctId, entry.getKey())
+                        .in(KdCustomerPo::getKdFid, chunk));
+                for (KdCustomerPo po : list) {
+                    if (po.getKdNumber() != null && !po.getKdNumber().isBlank()) {
+                        result.put(entry.getKey() + "|" + po.getKdFid(), po.getKdNumber());
+                    }
+                }
+            }
+        }
+        return result;
     }
 }

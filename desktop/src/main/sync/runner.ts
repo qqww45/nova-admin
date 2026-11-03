@@ -1,11 +1,13 @@
 import { BrowserWindow } from 'electron'
 import { getDb } from '../db'
+import { getPublicConfig } from '../configStore'
 import { getKingdee } from '../kingdee/client'
 import { buildLineCandidates } from '../kingdee/lineKeys'
 import { asRow, cellNumber, cellScalar, cellTypeName } from '../kingdee/cells'
 import { loadOutstockMapping } from '../mappingStore'
 import { serverLineFieldKeys } from '../nova/tasks'
 import { tryAcquire, release } from '../businessLock'
+import { decideSyncFilter, maxKdTime, normalizeKdTime } from './filter'
 import type { LastSyncStat, SyncEntity, SyncProgress, SyncStartInput } from '../../shared/types'
 
 function emit(progress: SyncProgress) {
@@ -16,6 +18,24 @@ function emit(progress: SyncProgress) {
 
 function nowIso() {
   return new Date().toISOString()
+}
+
+/** 读 meta 表里的同步策略键（水位 / 探测结论，均按账套隔离） */
+function getMeta(key: string): string | undefined {
+  const row = getDb().prepare(`SELECT value FROM meta WHERE key = ?`).get(key) as
+    | { value: string }
+    | undefined
+  return row ? row.value : undefined
+}
+
+/** 写 meta 表（upsert） */
+function setMeta(key: string, value: string) {
+  getDb()
+    .prepare(
+      `INSERT INTO meta(key, value) VALUES(?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+    )
+    .run(key, value)
 }
 
 async function syncCustomers(sinceDate: string): Promise<SyncProgress> {
@@ -126,9 +146,10 @@ function num(v: unknown): number {
   return cellNumber(v)
 }
 
-/** 抓取出库分录；字段集逐套尝试，成功即用。整表重建 outbound_line */
+/** 抓取出库分录；字段集逐套尝试，成功即用。重建范围 = 本轮表头重写的单 */
 async function syncOutboundLines(
-  sinceDate: string
+  filter: string,
+  batchStartIso: string
 ): Promise<{ lineCount: number; fieldKeys: string; zeroAmount: boolean; firstRowTypes: string }> {
   const client = getKingdee()
   const db = getDb()
@@ -137,7 +158,6 @@ async function syncOutboundLines(
 
   // 服务端配置作为候选之一（运维改字段不用发版），失败仍按后续候选降级
   const candidates = buildLineCandidates(mapping, serverLineFieldKeys())
-  const filter = sinceDate ? `FDate>='${sinceDate}'` : ''
   let lastErr: unknown = null
 
   for (let ci = 0; ci < candidates.length; ci++) {
@@ -147,14 +167,13 @@ async function syncOutboundLines(
       const kinds = fieldKeys.split(',').map((t) => classifyLineToken(t, poField))
       const idx = (kind: LineCol) => kinds.indexOf(kind)
 
-      // 每套字段集尝试前先清掉本批次范围的旧行，保证可重入（增量同步只清 sinceDate 之后的单）
-      if (sinceDate) {
-        db.prepare(
-          `DELETE FROM outbound_line WHERE outbound_fid IN (SELECT fid FROM outbound WHERE fdate >= ?)`
-        ).run(sinceDate)
-      } else {
-        db.prepare(`DELETE FROM outbound_line`).run()
-      }
+      // 每套字段集尝试前先清掉本轮表头重写过的单的分录，保证可重入。
+      // 双水位增量模式下表头按 FModifyDate 拉回"被修改过的单"，这些单的分录
+      // 整单重建；全量 / 显式日期模式下本轮见到的单同样 sync_at >= batchStartIso，
+      // 语义统一且比旧版"按 fdate 推"更精确。
+      db.prepare(
+        `DELETE FROM outbound_line WHERE outbound_fid IN (SELECT fid FROM outbound WHERE sync_at >= ?)`
+      ).run(batchStartIso)
 
       const insert = db.prepare(`
         INSERT INTO outbound_line(
@@ -254,7 +273,7 @@ async function syncOutboundLines(
   throw lastErr instanceof Error ? lastErr : new Error(String(lastErr))
 }
 
-async function syncOutbound(sinceDate: string): Promise<SyncProgress> {
+async function syncOutbound(sinceDate: string | undefined): Promise<SyncProgress> {
   const client = getKingdee()
   const db = getDb()
   const started = nowIso()
@@ -263,14 +282,23 @@ async function syncOutbound(sinceDate: string): Promise<SyncProgress> {
   ).run('outbound', 'running', 0, '', started)
 
   try {
-    const filter = sinceDate ? `FDate>='${sinceDate}'` : ''
-    const fieldKeys =
-      'FID,FBillNo,FDate,FCustomerID,FCustomerID.FName,FDocumentStatus,FCancelStatus'
-    let start = 0
+    const acctId = getPublicConfig().acctId || ''
+    // 双水位决策：显式日期 → FDate；有水位且账套支持 → FModifyDate 增量；否则全量
+    const decision = decideSyncFilter({
+      explicitSinceDate: sinceDate,
+      supportsModify: getMeta(`outstock_modify_supported:${acctId}`) === '1',
+      watermark: getMeta(`last_modify_watermark:${acctId}`),
+      lastSweepAt: getMeta(`last_sweep_at:${acctId}`)
+    })
+    const filter = decision.filter
+    // 本轮开始时间：分录按"本轮表头重写的单"重建的边界
+    const batchStartIso = nowIso()
+
     let total = 0
+    let maxModify = ''
     const upsert = db.prepare(`
-      INSERT INTO outbound(fid, fbillno, fdate, customer_fid, customer_name, amount_cents, status, cancelled, sync_at)
-      VALUES(@fid, @fbillno, @fdate, @customer_fid, @customer_name, 0, @status, @cancelled, @sync_at)
+      INSERT INTO outbound(fid, fbillno, fdate, customer_fid, customer_name, amount_cents, status, cancelled, modify_time, sync_at)
+      VALUES(@fid, @fbillno, @fdate, @customer_fid, @customer_name, 0, @status, @cancelled, @modify_time, @sync_at)
       ON CONFLICT(fid) DO UPDATE SET
         fbillno=excluded.fbillno,
         fdate=excluded.fdate,
@@ -278,43 +306,89 @@ async function syncOutbound(sinceDate: string): Promise<SyncProgress> {
         customer_name=excluded.customer_name,
         status=excluded.status,
         cancelled=excluded.cancelled,
+        modify_time=excluded.modify_time,
         sync_at=excluded.sync_at
     `)
 
-    while (true) {
-      const rows = await client.executeBillQuery({
-        FormId: 'SAL_OUTSTOCK',
-        FieldKeys: fieldKeys,
-        FilterString: filter,
-        OrderString: 'FDate ASC',
-        StartRow: start,
-        Limit: 2000
-      })
-      const tx = db.transaction((batch: unknown[][]) => {
-        for (const raw of batch) {
-          const r = asRow(raw)
-          upsert.run({
-            fid: cellNumber(r[0]),
-            fbillno: cellScalar(r[1]),
-            fdate: cellScalar(r[2]).slice(0, 10),
-            customer_fid: cellNumber(r[3]),
-            customer_name: cellScalar(r[4]),
-            status: cellScalar(r[5]),
-            cancelled: cellScalar(r[6]) === 'B' ? 1 : 0,
-            sync_at: nowIso()
-          })
+    /** 拉表头并 upsert；返回 { total, maxModify } */
+    const fetchHead = async (fieldKeys: string) => {
+      let start = 0
+      let count = 0
+      let modifyMax = ''
+      while (true) {
+        const rows = await client.executeBillQuery({
+          FormId: 'SAL_OUTSTOCK',
+          FieldKeys: fieldKeys,
+          FilterString: filter,
+          OrderString: 'FDate ASC',
+          StartRow: start,
+          Limit: 2000
+        })
+        const tx = db.transaction((batch: unknown[][]) => {
+          for (const raw of batch) {
+            const r = asRow(raw)
+            const modify = normalizeKdTime(r[7])
+            upsert.run({
+              fid: cellNumber(r[0]),
+              fbillno: cellScalar(r[1]),
+              fdate: cellScalar(r[2]).slice(0, 10),
+              customer_fid: cellNumber(r[3]),
+              customer_name: cellScalar(r[4]),
+              status: cellScalar(r[5]),
+              cancelled: cellScalar(r[6]) === 'B' ? 1 : 0,
+              // FModifyDate 缺失（旧字段集）时清空，避免残留上一轮的旧修改时间
+              modify_time: modify || null,
+              sync_at: nowIso()
+            })
+            modifyMax = maxKdTime(modifyMax, modify)
+          }
+        })
+        tx(rows)
+        count += rows.length
+        if (rows.length < 2000) break
+        start += 2000
+      }
+      return { total: count, maxModify: modifyMax }
+    }
+
+    // FModifyDate 能力探测：结果按账套缓存。8 字段失败且 7 字段成功 = 该账套没有
+    // FModifyDate（或不可过滤/不可取列）；两个都失败则抛第一次的错误（连接类问题）
+    const HEAD_BASE =
+      'FID,FBillNo,FDate,FCustomerID,FCustomerID.FName,FDocumentStatus,FCancelStatus'
+    const supportedKey = `outstock_modify_supported:${acctId}`
+    const supported = getMeta(supportedKey)
+    let head: { total: number; maxModify: string }
+    if (supported === '1') {
+      head = await fetchHead(`${HEAD_BASE},FModifyDate`)
+    } else if (supported === '0') {
+      head = await fetchHead(HEAD_BASE)
+    } else {
+      try {
+        head = await fetchHead(`${HEAD_BASE},FModifyDate`)
+        setMeta(supportedKey, '1')
+      } catch (firstErr) {
+        try {
+          head = await fetchHead(HEAD_BASE)
+          setMeta(supportedKey, '0')
+        } catch {
+          throw firstErr
         }
-      })
-      tx(rows)
-      total += rows.length
-      if (rows.length < 2000) break
-      start += 2000
+      }
+    }
+    total = head.total
+
+    // 水位推进：只进不退。显式 FDate 重拉模式不推进（用户在纠错，水位不动）
+    if (decision.mode === 'fmodify' && head.maxModify) {
+      setMeta(`last_modify_watermark:${acctId}`, maxKdTime(decision.watermark || '', head.maxModify))
+    }
+    if (decision.sweepFrom) {
+      setMeta(`last_sweep_at:${acctId}`, batchStartIso)
     }
 
     // 表头完成后同步分录；分录失败不回滚表头，但要在结果里报出来
     let lineMsg = ''
     try {
-      const lines = await syncOutboundLines(sinceDate)
+      const lines = await syncOutboundLines(filter, batchStartIso)
       lineMsg = `，分录 ${lines.lineCount} 条`
       if (lines.zeroAmount) {
         lineMsg += `（警告：金额全为 0，字段映射可能不对；首行类型 ${lines.firstRowTypes}）`
@@ -324,16 +398,22 @@ async function syncOutbound(sinceDate: string): Promise<SyncProgress> {
       lineMsg = `，分录同步失败：${msg}`
     }
 
+    const modeMsg =
+      decision.mode === 'fmodify'
+        ? `（增量，水位 ${decision.watermark}${decision.sweepFrom ? `，含月度回看 ${decision.sweepFrom}` : ''}）`
+        : decision.mode === 'fdate'
+          ? `（按业务日期 ${sinceDate} 重拉）`
+          : '（全量）'
     const finished = nowIso()
     db.prepare(
       `UPDATE sync_run SET status=?, row_count=?, message=?, finished_at=? WHERE entity=? AND started_at=?`
-    ).run('success', total, `出库头 ${total} 条${lineMsg}`, finished, 'outbound', started)
+    ).run('success', total, `出库头 ${total} 条${modeMsg}${lineMsg}`, finished, 'outbound', started)
 
     return {
       entity: 'outbound',
       status: 'success',
       rowCount: total,
-      message: `出库头 ${total} 条${lineMsg}`,
+      message: `出库头 ${total} 条${modeMsg}${lineMsg}`,
       finishedAt: finished
     }
   } catch (e) {
@@ -437,8 +517,8 @@ export async function runSync(input: SyncStartInput): Promise<SyncProgress[]> {
     for (const entity of order) {
       emit({ entity, status: 'running', rowCount: 0, message: '同步中…' })
       let progress: SyncProgress
-      if (entity === 'customer') progress = await syncCustomers(input.sinceDate)
-      else if (entity === 'sale_order') progress = await syncSaleOrders(input.sinceDate)
+      if (entity === 'customer') progress = await syncCustomers(input.sinceDate || '')
+      else if (entity === 'sale_order') progress = await syncSaleOrders(input.sinceDate || '')
       else progress = await syncOutbound(input.sinceDate)
       results.push(progress)
       emit(progress)

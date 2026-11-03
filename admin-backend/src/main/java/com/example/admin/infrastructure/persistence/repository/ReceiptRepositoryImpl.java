@@ -90,6 +90,14 @@ public class ReceiptRepositoryImpl implements ReceiptRepository {
         return receiptMapper.selectList(wrapper).stream().map(converter::receiptToDomain).toList();
     }
 
+    @Override
+    public List<Receipt> listAll() {
+        LambdaQueryWrapper<BizReceipt> wrapper = new LambdaQueryWrapper<BizReceipt>()
+                .ne(BizReceipt::getStatus, ReceiptStatus.VOID.getCode())
+                .orderByAsc(BizReceipt::getReceiptDate);
+        return receiptMapper.selectList(wrapper).stream().map(converter::receiptToDomain).toList();
+    }
+
     private <T> PageResult<T> toPageResult(IPage<?> page, List<T> records) {
         PageResult<T> result = new PageResult<>();
         result.setRecords(records);

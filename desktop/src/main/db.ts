@@ -5,7 +5,7 @@ import { getUserRoots } from './paths'
 
 let db: Database.Database | null = null
 
-const SCHEMA_VERSION = 3
+const SCHEMA_VERSION = 4
 
 export function getDb(): Database.Database {
   if (db) return db
@@ -156,11 +156,23 @@ function migrate(database: Database.Database) {
   }
 
   // v3：补「规格」列。对账单（金样板）明细的规格列需要 FMaterialId.FSpecification，
-  // 此前整条链路都没有采集，导出的规格永远为空。
+  // 此前整条链路（采集 → 落库 → 导出）都没有采集该字段，导出的规格永远为空。
+  // 老库补列后为 NULL，下一次全量同步（分录按单 DELETE+INSERT 重建）会自动回填。
   if (current < 3) {
     const cols = database.prepare(`PRAGMA table_info(outbound_line)`).all() as Array<{ name: string }>
     const has = (name: string) => cols.some((c) => c.name === name)
     if (!has('spec')) database.exec(`ALTER TABLE outbound_line ADD COLUMN spec TEXT`)
+    database
+      .prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`)
+      .run(String(SCHEMA_VERSION))
+  }
+
+  // v4：双水位增量（方案 §3.1 目标形态）。存金蝶 FModifyDate（单据修改时间），
+  // 有了它增量才能"抓到改过的历史单"，不再依赖用户手填的 FDate 起点。
+  if (current < 4) {
+    const cols = database.prepare(`PRAGMA table_info(outbound)`).all() as Array<{ name: string }>
+    const has = (name: string) => cols.some((c) => c.name === name)
+    if (!has('modify_time')) database.exec(`ALTER TABLE outbound ADD COLUMN modify_time TEXT`)
     database
       .prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`)
       .run(String(SCHEMA_VERSION))

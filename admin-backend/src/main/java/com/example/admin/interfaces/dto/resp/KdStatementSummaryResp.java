@@ -24,6 +24,9 @@ public class KdStatementSummaryResp {
     @Schema(description = "客户名称")
     private String customerName;
 
+    @Schema(description = "金蝶客户编码（重名客户识别用）")
+    private String customerNumber;
+
     @Schema(description = "出库单数")
     private Integer billCount;
 

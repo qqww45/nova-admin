@@ -1,6 +1,7 @@
 import http from '@/utils/request';
 import type { PageResult } from '@/types/api';
 import type {
+  KdAutoSuggestResult,
   KdBatchQuery,
   KdBindingCodeResp,
   KdBindingRedeemResp,
@@ -8,14 +9,17 @@ import type {
   KdCommandResp,
   KdCustomerDataQuery,
   KdCustomerDataResp,
+  KdCustomerMappingResp,
   KdFieldMappingResp,
   KdFieldMappingSaveReq,
   KdLineDataQuery,
+  KdMappingSaveReq,
   KdOutboundDataQuery,
   KdOutboundDataResp,
   KdOutboundLineDataResp,
   KdOwnerResp,
   KdStatementDetailResp,
+  KdStatementHealthResp,
   KdStatementQuery,
   KdStatementSummaryResp,
   KdSyncBatchResp,
@@ -92,6 +96,35 @@ export const kdConfigApi = {
 };
 
 /**
+ * 金蝶客户 ↔ 内部客户映射（试点批 R4）。
+ *
+ * <p>两套客户体系的桥：业务员在页面确认映射，后续两口径联动才有地基。
+ */
+export const kdMappingApi = {
+  /** 映射行列表（一个金蝶客户一行，含未匹配 / 建议 / 已确认状态） */
+  list(params: {
+    acctId?: string;
+    status?: string;
+    keyword?: string;
+    ownerUserId?: string;
+  }): Promise<KdCustomerMappingResp[]> {
+    return http.get<KdCustomerMappingResp[]>('/kd/mapping/list', params);
+  },
+
+  /** 自动匹配建议：名称标准化唯一命中生成待确认建议 */
+  autoSuggest(acctId?: string, ownerUserId?: string): Promise<KdAutoSuggestResult> {
+    return http.post<KdAutoSuggestResult>('/kd/mapping/auto-suggest', undefined, {
+      params: { acctId, ownerUserId },
+    });
+  },
+
+  /** 人工保存映射（视为已确认） */
+  save(data: KdMappingSaveReq): Promise<void> {
+    return http.post<void>('/kd/mapping/save', data);
+  },
+};
+
+/**
  * 金蝶同步数据查看（排查页）。
  *
  * <p>只读接口，业务员只见本人数据（服务层强制 ownerUserId 隔离）；
@@ -148,6 +181,11 @@ export const kdStatementApi = {
   /** 单客户明细 */
   detail(params: KdStatementQuery): Promise<KdStatementDetailResp> {
     return http.get<KdStatementDetailResp>('/kd/statement/detail', params);
+  },
+
+  /** 数据体检：本期无分录 / 作废 / 失效单据计数 */
+  health(params: KdStatementQuery): Promise<KdStatementHealthResp> {
+    return http.get<KdStatementHealthResp>('/kd/statement/health', params);
   },
 
   /** 导出 xlsx（不传客户时导出范围内全部客户；版式与签字样板一致） */

@@ -32,6 +32,7 @@ import com.example.admin.domain.repository.KdSyncBatchRepository;
 import com.example.admin.domain.repository.KdSyncTaskRepository;
 import com.example.admin.interfaces.dto.req.KdBatchPageQuery;
 import com.example.admin.interfaces.dto.req.KdCustomerSyncReq;
+import com.example.admin.interfaces.dto.req.KdMappingUploadReq;
 import com.example.admin.interfaces.dto.req.KdOutboundLineSyncReq;
 import com.example.admin.interfaces.dto.req.KdOutboundSyncReq;
 import com.example.admin.interfaces.dto.req.KdSyncBatchFinishReq;
@@ -78,6 +79,12 @@ public class KdSyncAppServiceImpl implements KdSyncAppService {
 
     /** 实体：整批 */
     public static final String ENTITY_ALL = "ALL";
+
+    /** 字段映射键：出库分录字段集（与管理端配置页 / 文档约定一致） */
+    public static final String MAPPING_KEY_LINE_FIELDS = "line_field_keys";
+
+    /** 字段映射键：客户采购订单号字段 */
+    public static final String MAPPING_KEY_CUSTOMER_PO = "customer_po_field";
 
     private final KdBindingRepository bindingRepository;
     private final KdSyncTaskRepository taskRepository;
@@ -277,6 +284,52 @@ public class KdSyncAppServiceImpl implements KdSyncAppService {
         bindingUpdate.setLastSyncResult(StrUtil.maxLength(
                 StrUtil.blankToDefault(req.getMessage(), "同步成功"), 400));
         bindingRepository.update(bindingUpdate);
+    }
+
+    /**
+     * 采集器字段自检结果回传。
+     *
+     * <p>写到本绑定（采集器令牌即身份，无需也不能指定别人的绑定）的
+     * {@code kd_field_mapping}，key 与管理端配置页约定一致；运维在网页确认后
+     * 通过 {@code config.reload} 让全部采集器生效。
+     */
+    @Override
+    public void uploadMapping(KdMappingUploadReq req) {
+        KdClientIdentity principal = kdClientContext.require();
+        Long bindingId = principal.bindingId();
+
+        upsertMapping(bindingId, MAPPING_KEY_LINE_FIELDS, req.getLineFieldKeys(), req.getNote());
+        upsertMapping(bindingId, MAPPING_KEY_CUSTOMER_PO, req.getCustomerPoField(), req.getNote());
+        log.info("采集器回传字段映射：bindingId={}, lineFieldKeys={}, customerPoField={}",
+                bindingId, StrUtil.maxLength(req.getLineFieldKeys(), 80), req.getCustomerPoField());
+    }
+
+    /**
+     * 幂等写一条映射：不存在则新增，存在则覆盖值与备注。
+     *
+     * @param bindingId 绑定 ID
+     * @param key 映射键
+     * @param value 值；空值跳过（只回传了部分字段时不动其余键）
+     * @param note 备注
+     */
+    private void upsertMapping(Long bindingId, String key, String value, String note) {
+        String trimmed = StrUtil.trim(value);
+        if (StrUtil.isBlank(trimmed)) {
+            return;
+        }
+        KdFieldMapping mapping = mappingRepository.find(bindingId, key);
+        if (mapping == null) {
+            mapping = new KdFieldMapping();
+            mapping.setBindingId(bindingId);
+            mapping.setMappingKey(key);
+            mapping.setMappingValue(trimmed);
+            mapping.setRemark(StrUtil.blankToDefault(note, "采集器字段自检回传"));
+            mappingRepository.save(mapping);
+            return;
+        }
+        mapping.setMappingValue(trimmed);
+        mapping.setRemark(StrUtil.blankToDefault(note, "采集器字段自检回传"));
+        mappingRepository.update(mapping);
     }
 
     @Override

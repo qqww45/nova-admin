@@ -109,4 +109,11 @@ public interface ShipmentRepository {
      * @return 出货记录列表
      */
     List<Shipment> listByCustomerAndPeriod(Long customerId, LocalDateTime start, LocalDateTime end);
+
+    /**
+     * 全部有效出货（排除作废），应收速览等内存聚合用。
+     *
+     * @return 出货记录列表，按出货日期升序
+     */
+    List<Shipment> listAll();
 }

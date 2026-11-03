@@ -2,6 +2,7 @@ package com.example.admin.application.service;
 
 import com.example.admin.common.result.PageResult;
 import com.example.admin.interfaces.dto.req.KdBatchPageQuery;
+import com.example.admin.interfaces.dto.req.KdMappingUploadReq;
 import com.example.admin.interfaces.dto.req.KdCustomerSyncReq;
 import com.example.admin.interfaces.dto.req.KdOutboundLineSyncReq;
 import com.example.admin.interfaces.dto.req.KdOutboundSyncReq;
@@ -82,4 +83,14 @@ public interface KdSyncAppService {
      * @return 分页结果
      */
     PageResult<KdSyncBatchResp> batchPage(KdBatchPageQuery query);
+
+    /**
+     * 采集器字段自检结果回传：把自检拼出的分录字段集 / PO 字段写到本绑定的字段映射。
+     *
+     * <p>key 与管理端配置页约定一致（{@code line_field_keys} / {@code customer_po_field}），
+     * 运维在网页上看到后确认即可，砍掉"业务员复制报告给运维、运维手抄配置"的一次往返。
+     *
+     * @param req 回传内容
+     */
+    void uploadMapping(KdMappingUploadReq req);
 }
