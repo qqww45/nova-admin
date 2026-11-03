@@ -150,11 +150,31 @@ export function unbindNova(): NovaState {
 }
 
 /**
- * 执行一次上行同步。
+ * 执行一次上行同步（并发去重）。
+ *
+ * <p>入口有四个：本地同步完成自动上行、指令 sync.now、托盘定时/手动、页面手动点。
+ * 这些入口共用"本地待上报行"这一个数据集，重叠执行时两个批次会同时 upsert 同一批行：
+ * 读-判-写不是原子的，后落库方撞唯一键 / SQLite 撞写锁，服务端只能回 500
+ *（2026-11-03 生产小批次的「服务器内部错误」与该形态吻合：整批数据因规格校验
+ * 反复失败后积压，每次触发都重传同一批行，重叠概率随之放大）。
+ *
+ * <p>因此在进程内做去重：已有一次上行在跑时，后来的调用直接复用同一次结果，
+ * 不再并发发起第二个批次。上传本身是幂等的（服务端按金蝶内码 upsert），
+ * 跳过一次重复触发不影响正确性。
  *
  * @param entity 预留：限定实体；不传表示客户 + 出库单 + 分录全量增量
  */
-export async function uploadToNova(): Promise<NovaUploadResult> {
+let uploadInFlight: Promise<NovaUploadResult> | null = null
+
+export function uploadToNova(): Promise<NovaUploadResult> {
+  if (uploadInFlight) return uploadInFlight
+  uploadInFlight = doUploadToNova().finally(() => {
+    uploadInFlight = null
+  })
+  return uploadInFlight
+}
+
+async function doUploadToNova(): Promise<NovaUploadResult> {
   const rt = getNovaRuntime()
   if (!rt.token || !rt.bindingId) {
     return { ok: false, status: 'unbound', message: '尚未绑定对账平台' }

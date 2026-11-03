@@ -2,6 +2,9 @@ package com.example.admin.application.service.impl;
 
 import com.example.admin.domain.model.kd.KdClientIdentity;
 import com.example.admin.domain.model.kd.KdFieldMapping;
+import com.example.admin.domain.model.kd.KdOutboundLine;
+import com.example.admin.domain.model.kd.KdSyncBatch;
+import com.example.admin.domain.model.kd.KdUpsertResult;
 import com.example.admin.domain.port.KdClientContext;
 import com.example.admin.domain.port.OperatorContext;
 import com.example.admin.domain.repository.BizUserRepository;
@@ -13,6 +16,7 @@ import com.example.admin.domain.repository.KdOutboundRepository;
 import com.example.admin.domain.repository.KdSyncBatchRepository;
 import com.example.admin.domain.repository.KdSyncTaskRepository;
 import com.example.admin.interfaces.dto.req.KdMappingUploadReq;
+import com.example.admin.interfaces.dto.req.KdOutboundLineSyncReq;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -131,5 +135,46 @@ class KdSyncAppServiceImplTest {
 
         verify(mappingRepository, never()).save(any());
         verify(mappingRepository, never()).update(any());
+    }
+
+    @Test
+    @DisplayName("分录上行应原样透传超长规格——300~1000 字不再整批拒绝，也不做截断")
+    void uploadLinesShouldCarryLongSpecUntouched() {
+        // 回归背景：2026-11-03 生产批次因 rows[472].spec 超 300 字被整批拒绝
+        //（size must be between 0 and 300）。规格是对账依据，服务端不得截断。
+        when(kdClientContext.require()).thenReturn(new KdClientIdentity(9L, 7L, "ACCT_A"));
+        KdSyncBatch batch = new KdSyncBatch();
+        batch.setId(1L);
+        batch.setBatchNo("B1");
+        batch.setBindingId(9L);
+        batch.setRowCount(0);
+        batch.setUpsertCount(0);
+        batch.setSkippedCount(0);
+        when(batchRepository.findByBatchNo("B1")).thenReturn(batch);
+        when(lineRepository.upsertAll(any(), any(), any(), any()))
+                .thenReturn(new KdUpsertResult(1, 1, 0));
+        when(bindingRepository.findById(any())).thenReturn(null);
+
+        String longSpec = "规".repeat(301);
+        KdOutboundLineSyncReq req = new KdOutboundLineSyncReq();
+        req.setBatchId("B1");
+        KdOutboundLineSyncReq.Row row = new KdOutboundLineSyncReq.Row();
+        row.setOutboundFid(1001L);
+        row.setEntryId(100001L);
+        row.setMaterialNumber("M001");
+        row.setMaterialName("物料");
+        row.setSpec(longSpec);
+        req.setRows(List.of(row));
+
+        var resp = service.uploadLines(req);
+
+        assertEquals(1, resp.getUpserted());
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<KdOutboundLine>> captor = ArgumentCaptor.forClass((Class) List.class);
+        verify(lineRepository).upsertAll(any(), any(), any(), captor.capture());
+        List<KdOutboundLine> saved = captor.getValue();
+        assertEquals(1, saved.size());
+        assertEquals(longSpec, saved.get(0).getSpec(), "规格必须原样落库，不得截断");
+        assertEquals(301, saved.get(0).getSpec().length());
     }
 }
