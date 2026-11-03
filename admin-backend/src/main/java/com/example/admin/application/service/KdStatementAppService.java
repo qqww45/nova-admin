@@ -3,6 +3,7 @@ package com.example.admin.application.service;
 import com.example.admin.common.result.PageResult;
 import com.example.admin.interfaces.dto.req.KdStatementQuery;
 import com.example.admin.interfaces.dto.resp.KdStatementDetailResp;
+import com.example.admin.interfaces.dto.resp.KdStatementHealthResp;
 import com.example.admin.interfaces.dto.resp.KdStatementSummaryResp;
 
 /**
@@ -40,4 +41,15 @@ public interface KdStatementAppService {
      * @return 文件字节
      */
     byte[] export(KdStatementQuery query);
+
+    /**
+     * 数据体检：解释"本期为什么对账单少数据 / 金额对不上"。
+     *
+     * <p>统计窗口内三类不进对账单的单据：无分录（退回表头金额）、作废、失效。
+     * 口径与 {@link #summary} 相同的隔离与窗口限制。
+     *
+     * @param query 查询条件
+     * @return 体检结果
+     */
+    KdStatementHealthResp health(KdStatementQuery query);
 }

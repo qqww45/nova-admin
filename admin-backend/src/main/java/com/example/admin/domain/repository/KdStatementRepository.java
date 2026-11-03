@@ -46,4 +46,19 @@ public interface KdStatementRepository {
      * @return 分录列表（按单据 + 分录内码排序）
      */
     List<KdOutboundLine> listLines(Long ownerUserId, List<KdOutbound> bills);
+
+    /**
+     * 查窗口内全部出库单头（不过滤作废 / 失效），体检用。
+     *
+     * <p>作废与失效本身就是"对账单少数据"的常见根因（方案 §3.3），
+     * 体检口径与对账口径相反：必须看得到被对账单排除的行才能解释差额。
+     *
+     * @param ownerUserId 数据归属人；null 表示不限（管理员）
+     * @param acctId 账套；空表示不限
+     * @param from 业务日期起（含）；null 不限
+     * @param to 业务日期止（含）；null 不限
+     * @return 单据列表，按业务日期升序
+     */
+    List<KdOutbound> listAllBillsIncludingExcluded(Long ownerUserId, String acctId,
+                                                   LocalDateTime from, LocalDateTime to);
 }

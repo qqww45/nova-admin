@@ -15,6 +15,7 @@ import com.example.admin.infrastructure.excel.XlsxWriter;
 import com.example.admin.interfaces.dto.req.KdStatementQuery;
 import com.example.admin.interfaces.dto.resp.KdStatementBillResp;
 import com.example.admin.interfaces.dto.resp.KdStatementDetailResp;
+import com.example.admin.interfaces.dto.resp.KdStatementHealthResp;
 import com.example.admin.interfaces.dto.resp.KdStatementLineResp;
 import com.example.admin.interfaces.dto.resp.KdStatementSummaryResp;
 import lombok.RequiredArgsConstructor;
@@ -269,6 +270,53 @@ public class KdStatementAppServiceImpl implements KdStatementAppService {
         } catch (IOException e) {
             throw new BusinessException("对账单导出失败：" + e.getMessage());
         }
+    }
+
+    @Override
+    public KdStatementHealthResp health(KdStatementQuery query) {
+        Scope scope = scope(query);
+        // 体检口径与对账口径相反：作废 / 失效行必须可见（它们正是差额的来源）
+        List<KdOutbound> all = statementRepository.listAllBillsIncludingExcluded(
+                scope.ownerUserId(), scope.acctId(), scope.from(), scope.toExclusive());
+
+        int billCount = 0;
+        int cancelledCount = 0;
+        int invalidCount = 0;
+        List<KdOutbound> valid = new ArrayList<>(all.size());
+        for (KdOutbound bill : all) {
+            boolean cancelled = bill.getCancelled() != null && bill.getCancelled() == 1;
+            boolean invalid = bill.getInvalid() != null && bill.getInvalid() == 1;
+            if (invalid) {
+                invalidCount++;
+            } else if (cancelled) {
+                cancelledCount++;
+            } else {
+                billCount++;
+                valid.add(bill);
+            }
+        }
+
+        // 无分录 = 有效单里没有一条有效分录：用「账套 + FID」关联（FID 只在账套内唯一）
+        List<KdOutboundLine> lines = statementRepository.listLines(scope.ownerUserId(), valid);
+        java.util.Set<String> withLines = new java.util.HashSet<>();
+        for (KdOutboundLine line : lines) {
+            withLines.add(billKey(line.getAcctId(), line.getOutboundFid()));
+        }
+        int noLineCount = 0;
+        for (KdOutbound bill : valid) {
+            if (!withLines.contains(billKey(bill.getAcctId(), bill.getKdFid()))) {
+                noLineCount++;
+            }
+        }
+
+        KdStatementHealthResp resp = new KdStatementHealthResp();
+        resp.setDateFrom(scope.from().toLocalDate().format(DATE));
+        resp.setDateTo(scope.toExclusive().toLocalDate().minusDays(1).format(DATE));
+        resp.setBillCount(billCount);
+        resp.setNoLineCount(noLineCount);
+        resp.setCancelledCount(cancelledCount);
+        resp.setInvalidCount(invalidCount);
+        return resp;
     }
 
     /* ---------------- 内部方法 ---------------- */

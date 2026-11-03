@@ -5,6 +5,7 @@ import com.example.admin.common.result.PageResult;
 import com.example.admin.common.result.R;
 import com.example.admin.interfaces.dto.req.KdStatementQuery;
 import com.example.admin.interfaces.dto.resp.KdStatementDetailResp;
+import com.example.admin.interfaces.dto.resp.KdStatementHealthResp;
 import com.example.admin.interfaces.dto.resp.KdStatementSummaryResp;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -60,6 +61,23 @@ public class KdStatementController {
     @PreAuthorize("@ss.hasPermi('kd:statement:list')")
     public R<KdStatementDetailResp> detail(@Valid KdStatementQuery query) {
         return R.ok(statementAppService.detail(query));
+    }
+
+    /**
+     * 数据体检：解释"本期为什么对账单少数据 / 金额对不上"。
+     *
+     * <p>统计窗口内三类不进对账单的单据：无分录（退回表头金额）、作废、失效。
+     * 与汇总共用隔离与窗口限制；权限也复用查询权限，不新增菜单。
+     *
+     * @param query 查询条件
+     * @return 体检结果
+     */
+    @Operation(summary = "对账单数据体检",
+            description = "统计窗口内无分录 / 作废 / 失效单据数，解释对账单与原始数据的差额")
+    @GetMapping("/health")
+    @PreAuthorize("@ss.hasPermi('kd:statement:list')")
+    public R<KdStatementHealthResp> health(@Valid KdStatementQuery query) {
+        return R.ok(statementAppService.health(query));
     }
 
     /**

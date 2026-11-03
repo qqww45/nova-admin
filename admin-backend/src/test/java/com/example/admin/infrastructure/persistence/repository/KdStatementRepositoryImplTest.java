@@ -8,6 +8,7 @@ import com.example.admin.infrastructure.persistence.converter.KdConverter;
 import com.example.admin.infrastructure.persistence.mapper.KdOutboundLineMapper;
 import com.example.admin.infrastructure.persistence.mapper.KdOutboundMapper;
 import com.example.admin.infrastructure.persistence.po.KdOutboundLinePo;
+import com.example.admin.infrastructure.persistence.po.KdOutboundPo;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
@@ -58,8 +59,16 @@ class KdStatementRepositoryImplTest {
      */
     @BeforeAll
     static void initTableInfo() {
-        TableInfoHelper.initTableInfo(
-                new MapperBuilderAssistant(new MybatisConfiguration(), ""), KdOutboundLinePo.class);
+        // currentNamespace 必须互不相同：相同 namespace 时后注册的实体进不了
+        // TableInfo 缓存，运行时抛 "can not find lambda cache"
+        MapperBuilderAssistant lineAssistant =
+                new MapperBuilderAssistant(new MybatisConfiguration(), "");
+        lineAssistant.setCurrentNamespace(KdOutboundLinePo.class.getName());
+        TableInfoHelper.initTableInfo(lineAssistant, KdOutboundLinePo.class);
+        MapperBuilderAssistant outboundAssistant =
+                new MapperBuilderAssistant(new MybatisConfiguration(), "");
+        outboundAssistant.setCurrentNamespace(KdOutboundPo.class.getName());
+        TableInfoHelper.initTableInfo(outboundAssistant, KdOutboundPo.class);
     }
 
     @Test
@@ -95,6 +104,28 @@ class KdStatementRepositoryImplTest {
         repository.listLines(null, List.of(bill("ACCT_A", 1L), bill("ACCT_A", 2L), bill("ACCT_A", 3L)));
 
         verify(lineMapper, times(1)).selectList(any());
+    }
+
+    @Test
+    @DisplayName("体检查询不得过滤作废/失效行，且必须带归属人隔离")
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void listAllBillsShouldNotFilterExcludedRows() {
+        when(outboundMapper.selectList(any())).thenReturn(List.of());
+
+        repository.listAllBillsIncludingExcluded(9L, "ACCT_A",
+                java.time.LocalDateTime.parse("2026-10-01T00:00:00"),
+                java.time.LocalDateTime.parse("2026-11-01T00:00:00"));
+
+        ArgumentCaptor<LambdaQueryWrapper<KdOutboundPo>> captor =
+                ArgumentCaptor.forClass((Class) LambdaQueryWrapper.class);
+        verify(outboundMapper).selectList(captor.capture());
+        String sql = captor.getValue().getSqlSegment();
+        assertTrue(sql != null && !sql.contains("invalid"), "体检查询过滤了 invalid 会让问题行不可见：" + sql);
+        assertTrue(sql != null && !sql.contains("cancelled"), "体检查询过滤了 cancelled 会让问题行不可见：" + sql);
+        java.util.List<Object> params = new java.util.ArrayList<>(
+                captor.getValue().getParamNameValuePairs().values());
+        assertTrue(params.contains(9L), "体检查询必须带 owner 隔离参数：" + params);
+        assertTrue(params.contains("ACCT_A"), "体检查询应带账套参数：" + params);
     }
 
     private static KdOutbound bill(String acctId, Long fid) {

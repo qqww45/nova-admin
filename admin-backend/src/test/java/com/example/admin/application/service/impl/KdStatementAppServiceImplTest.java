@@ -7,6 +7,7 @@ import com.example.admin.domain.model.kd.KdOutboundLine;
 import com.example.admin.domain.port.OperatorContext;
 import com.example.admin.domain.repository.KdStatementRepository;
 import com.example.admin.interfaces.dto.req.KdStatementQuery;
+import com.example.admin.interfaces.dto.resp.KdStatementHealthResp;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -149,6 +150,53 @@ class KdStatementAppServiceImplTest {
 
         assertTrue(xml.contains("GB/T 1243 套筒滚子链 08B-1"),
                 "规格型号应写入导出明细 sheet：" + xml);
+    }
+
+    @Test
+    @DisplayName("数据体检：无分录 / 作废 / 失效三类计数必须正确")
+    void healthShouldCountExcludedBills() {
+        when(operatorContext.current()).thenReturn(user("admin"));
+        KdOutbound cancelledBill = bill(5003L, 1001L, "深圳示例客户", "2026-10-03T00:00:00");
+        cancelledBill.setCancelled(1);
+        KdOutbound invalidBill = bill(5004L, 1001L, "深圳示例客户", "2026-10-04T00:00:00");
+        invalidBill.setInvalid(1);
+        // 4 张单：1 张有效有分录、1 张有效无分录（退回表头金额）、1 张作废、1 张失效
+        when(statementRepository.listAllBillsIncludingExcluded(any(), any(), any(), any()))
+                .thenReturn(List.of(
+                        bill(5001L, 1001L, "深圳示例客户", "2026-10-01T00:00:00"),
+                        bill(5002L, 1001L, "深圳示例客户", "2026-10-02T00:00:00"),
+                        cancelledBill,
+                        invalidBill));
+        when(statementRepository.listLines(any(), anyList()))
+                .thenReturn(List.of(line(5001L, 90001L, 100L)));
+
+        KdStatementHealthResp resp = service.health(query("2026-10-01", "2026-10-31"));
+
+        assertEquals(2, resp.getBillCount(), "有效单应为 2 张");
+        assertEquals(1, resp.getNoLineCount(), "无分录单应为 1 张（对账单退回表头金额）");
+        assertEquals(1, resp.getCancelledCount(), "作废单应为 1 张");
+        assertEquals(1, resp.getInvalidCount(), "失效单应为 1 张");
+        assertTrue(!resp.isHealthy(), "存在被排除单据时不应判为健康");
+    }
+
+    @Test
+    @DisplayName("数据体检：有效单的分录必须按账套+FID 关联，跨账套同 FID 不串单")
+    void healthShouldNotMixLinesAcrossAccts() {
+        when(operatorContext.current()).thenReturn(user("admin"));
+        KdOutbound a = bill(5001L, 1001L, "客户A", "2026-10-01T00:00:00");
+        KdOutbound b = bill(5001L, 1002L, "客户B", "2026-10-01T00:00:00");
+        b.setAcctId("ACCT_B");
+        when(statementRepository.listAllBillsIncludingExcluded(any(), any(), any(), any()))
+                .thenReturn(List.of(a, b));
+        // 只有 ACCT_B 的 5001 有分录；若按裸 FID 关联，ACCT_A 会被误判为有分录
+        KdOutboundLine bLine = line(5001L, 90001L, 100L);
+        bLine.setAcctId("ACCT_B");
+        when(statementRepository.listLines(any(), anyList())).thenReturn(List.of(bLine));
+
+        KdStatementHealthResp resp = service.health(query("2026-10-01", "2026-10-31"));
+
+        assertEquals(2, resp.getBillCount());
+        assertEquals(1, resp.getNoLineCount(), "ACCT_A 的 5001 应计为无分录，不能被 ACCT_B 的同 FID 分录串掉");
     }
 
     /* ---------------- 工具 ---------------- */

@@ -79,4 +79,18 @@ public class KdStatementRepositoryImpl implements KdStatementRepository {
         }
         return result;
     }
+
+    @Override
+    public List<KdOutbound> listAllBillsIncludingExcluded(Long ownerUserId, String acctId,
+                                                           LocalDateTime from, LocalDateTime to) {
+        LambdaQueryWrapper<KdOutboundPo> wrapper = new LambdaQueryWrapper<KdOutboundPo>()
+                // 体检口径：不过滤 invalid / cancelled——它们正是要暴露的问题行
+                .eq(ownerUserId != null, KdOutboundPo::getOwnerUserId, ownerUserId)
+                .eq(acctId != null && !acctId.isBlank(), KdOutboundPo::getAcctId, acctId)
+                .ge(from != null, KdOutboundPo::getBizDate, from)
+                .lt(to != null, KdOutboundPo::getBizDate, to)
+                .orderByAsc(KdOutboundPo::getBizDate)
+                .orderByAsc(KdOutboundPo::getBillNo);
+        return outboundMapper.selectList(wrapper).stream().map(converter::outboundToDomain).toList();
+    }
 }
