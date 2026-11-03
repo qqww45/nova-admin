@@ -160,21 +160,24 @@ mvn -f admin-backend/pom.xml -Pprod spring-boot:run -Dspring-boot.run.profiles=p
 > **注意**：`-Pprod` 只是 Maven profile（控制数据库驱动依赖），
 > **必须**同时用 `-Dspring-boot.run.profiles=prod` 才会让应用激活 prod profile。
 
-### 5.6 部署环境（staging）
+### 5.6 部署环境（默认 prod，staging 仅显式选择）
 
-当前线上采用"先跑起来"的过渡配置（`application-staging.yml`）：
+部署默认采用生产配置（`application-prod.yml`）：`deploy/Dockerfile`、`deploy/docker-compose.yml`
+与 CI 生成的引导 `.env` 的 `SPRING_PROFILES_ACTIVE` 默认均为 `prod`。
+prod profile 下启动守卫全部生效（`VerifyConfigGuard` / `DefaultCredentialGuard` / `JwtSecretGuard` / `CacheConfigGuard`），
+配置不达标会**拒绝启动**（fail-closed），而不是带病运行。
 
-| 项 | staging（当前线上） | dev（本地） | prod（正式） |
+| 项 | staging（过渡，需显式指定） | dev（本地） | prod（部署默认） |
 |---|---|---|---|
 | 数据库 | SQLite（`/app/data/admin.db`） | SQLite | MySQL |
-| 会话态 | 内存（单实例） | 内存 | Redis |
+| 会话态 | 内存（单实例） | 内存 | Redis（单机可显式 `ADMIN_CACHE_TYPE=memory`） |
 | 验证码通道 | `log` + 回传 | `log` + 回传 | `email`、不回传 |
 | 接口文档 | 关闭 | 开启 | 关闭 |
 | SQL 日志 | 关闭 | 打印 | 关闭 |
 | 启动守卫 | 跳过验证码/初始口令检查，JWT 密钥仍强校验 | 全部跳过 | 全部强制 |
 
 > staging 仅用于内部验收：不能存真实数据，不能水平扩容，验证码可被前端读到。
-> 正式上线切到 `prod` profile，`VerifyConfigGuard` / `DefaultCredentialGuard` 会自动恢复强制校验。
+> 服务器 `.env` 中显式写 `SPRING_PROFILES_ACTIVE=staging` 才会落到该配置——是运维的主动选择而非默认值。
 
 **拓扑**
 
@@ -196,8 +199,15 @@ mvn -f admin-backend/pom.xml -Pprod spring-boot:run -Dspring-boot.run.profiles=p
 
 **服务器首次部署**
 
-服务器上没有 `.env` 时，流水线会用 `secrets.JWT_SECRET` + `vars.CORS_ALLOWED_ORIGINS` 自动生成一份，
-无需手工准备；已存在 `.env` 则以服务器为准（流水线永不覆盖）。
+服务器上没有 `.env` 时，流水线会用 `secrets.JWT_SECRET` + `vars.CORS_ALLOWED_ORIGINS` 自动生成一份
+（`SPRING_PROFILES_ACTIVE=prod`，并附 DB / Redis / 邮件的注释占位项）；已存在 `.env` 则以服务器为准（流水线永不覆盖）。
+
+> 注意：prod 引导 `.env` 在补齐 DB（MySQL）、MAIL 三项并修改内置账号初始密码**之前**，
+> 后端会因启动守卫拒绝启动（fail-closed，日志会列出缺失项）。
+> 过渡期可在服务器 `.env` 显式设置 `SPRING_PROFILES_ACTIVE=staging`（弱化配置，仅限内部验收）。
+> **已用旧版流水线生成过 `.env` 的存量服务器**：其中写死的
+> `SPRING_PROFILES_ACTIVE=staging`、`ADMIN_VERIFY_CHANNEL=log`、`ADMIN_VERIFY_REVEAL_CODE=true`
+> 需人工删除/修改（服务器 `.env` 流水线永不覆盖），否则升级后仍是弱化的过渡配置。
 
 ```bash
 mkdir -p /opt/nova-admin/{data,logs}     # 目录创建即可，其余由流水线上传并启动
