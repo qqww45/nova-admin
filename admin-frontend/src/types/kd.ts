@@ -191,6 +191,22 @@ export interface KdStatementDetailResp {
   bills: KdStatementBillResp[];
 }
 
+/** 对账单数据体检：解释"本期为什么对账单少数据 / 金额对不上" */
+export interface KdStatementHealthResp {
+  dateFrom?: string;
+  dateTo?: string;
+  /** 有效出库单数（未作废、未失效） */
+  billCount: number;
+  /** 无分录数据的单数（对账单退回表头金额） */
+  noLineCount: number;
+  /** 作废单数 */
+  cancelledCount: number;
+  /** 已失效单数（金蝶侧物理删除） */
+  invalidCount: number;
+  /** 全部健康（无分录/作废/失效均为 0） */
+  healthy: boolean;
+}
+
 /** 采集器指令 */
 export interface KdCommandResp {
   id: string;

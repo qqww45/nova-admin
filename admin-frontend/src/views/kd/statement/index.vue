@@ -1,5 +1,27 @@
 <template>
   <div class="app-container">
+    <!-- 数据体检条幅：金额对不上时，第一嫌疑就是这三类不进对账单的单据 -->
+    <el-alert
+      v-if="health"
+      :type="health.healthy ? 'success' : 'warning'"
+      :closable="false"
+      show-icon
+      class="health-bar"
+    >
+      <template #title>
+        <span v-if="health.healthy">
+          本期体检（{{ health.dateFrom }} ~ {{ health.dateTo }}）：有效出库单
+          {{ health.billCount }} 张，全部有分录、未作废、未失效
+        </span>
+        <span v-else>
+          本期体检（{{ health.dateFrom }} ~ {{ health.dateTo }}）：有效出库单 {{ health.billCount }} 张；
+          <b>无分录 {{ health.noLineCount }} 张</b>（对账单退回表头金额）、
+          作废 {{ health.cancelledCount }} 张、已失效 {{ health.invalidCount }} 张
+          ——这三类单据不进对账单，金额对不上时请到「金蝶同步 → 出库数据」核对标记
+        </span>
+      </template>
+    </el-alert>
+
     <ProTable
       :columns="columns"
       :data="list"
@@ -22,6 +44,7 @@
             start-placeholder="开始"
             end-placeholder="结束"
             value-format="YYYY-MM-DD"
+            :shortcuts="dateShortcuts"
             style="width: 260px"
           />
         </el-form-item>
@@ -38,7 +61,7 @@
         </el-form-item>
       </template>
       <template #search-buttons>
-        <el-button type="primary" @click="reload">查询</el-button>
+        <el-button type="primary" @click="handleSearch">查询</el-button>
         <el-button @click="handleReset">重置</el-button>
         <el-button v-if="canExport" :loading="exporting" @click="handleExport">导出 Excel</el-button>
       </template>
@@ -55,6 +78,9 @@
       <template #col-actions="{ row }">
         <el-button link type="primary" @click="openDetail(row as KdStatementSummaryResp)">
           查看明细
+        </el-button>
+        <el-button link type="primary" @click="copySummaryAsText(row as KdStatementSummaryResp)">
+          复制报数
         </el-button>
       </template>
     </ProTable>
@@ -113,7 +139,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import ProTable from '@/components/ProTable/index.vue';
 import type { ProTableColumn } from '@/components/ProTable/index.vue';
@@ -123,6 +149,7 @@ import { kdStatementApi } from '@/api/kd';
 import type {
   KdStatementBillResp,
   KdStatementDetailResp,
+  KdStatementHealthResp,
   KdStatementLineResp,
   KdStatementQuery,
   KdStatementSummaryResp,
@@ -135,6 +162,42 @@ const canExport = computed(() => userStore.hasPermission('kd:statement:export'))
 const dateRange = ref<string[]>([]);
 const searchForm = ref<{ acctId: string; keyword: string }>({ acctId: '', keyword: '' });
 const exporting = ref(false);
+
+/** 对账基本按月发生：本月 / 上月 / 近 30 天 / 本季度一键选定，免手点日历 */
+const dateShortcuts = [
+  {
+    text: '本月',
+    value: (): [Date, Date] => {
+      const now = new Date();
+      return [new Date(now.getFullYear(), now.getMonth(), 1), now];
+    },
+  },
+  {
+    text: '上月',
+    value: (): [Date, Date] => {
+      const now = new Date();
+      return [
+        new Date(now.getFullYear(), now.getMonth() - 1, 1),
+        new Date(now.getFullYear(), now.getMonth(), 0),
+      ];
+    },
+  },
+  {
+    text: '近 30 天',
+    value: (): [Date, Date] => {
+      const now = new Date();
+      return [new Date(now.getTime() - 29 * 86_400_000), now];
+    },
+  },
+  {
+    text: '本季度',
+    value: (): [Date, Date] => {
+      const now = new Date();
+      const quarterStart = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
+      return [quarterStart, now];
+    },
+  },
+];
 
 /** 界面上是日期区间，后端要的是两个独立参数 */
 function currentQuery(): KdStatementQuery {
@@ -149,13 +212,34 @@ function currentQuery(): KdStatementQuery {
 const { loading, list, total, pageNum, pageSize, reload, reset, onPageChange, onSizeChange } =
   useTable<KdStatementSummaryResp>((params) => kdStatementApi.summary({ ...params, ...currentQuery() }));
 
+/* ---------------- 数据体检条幅 ---------------- */
+const health = ref<KdStatementHealthResp | null>(null);
+const healthLoading = ref(false);
+
+async function loadHealth(): Promise<void> {
+  healthLoading.value = true;
+  try {
+    health.value = await kdStatementApi.health(currentQuery());
+  } catch {
+    // 体检失败不阻塞对账单主流程，只是少一条提示
+    health.value = null;
+  } finally {
+    healthLoading.value = false;
+  }
+}
+
+function handleSearch(): void {
+  reload();
+  void loadHealth();
+}
+
 const columns: ProTableColumn[] = [
   { prop: 'customerName', label: '客户', minWidth: 220, showOverflowTooltip: true },
   { prop: 'acctId', label: '账套', width: 140, showOverflowTooltip: true },
   { prop: 'billCount', label: '出库单数', width: 100, align: 'right' },
   { prop: 'totalAmount', label: '金额合计', width: 150, align: 'right', slot: true },
   { prop: 'period', label: '起 / 止', width: 140, slot: true },
-  { prop: 'actions', label: '操作', width: 100, fixed: 'right', slot: true },
+  { prop: 'actions', label: '操作', width: 160, fixed: 'right', slot: true },
 ];
 
 const detailVisible = ref(false);
@@ -170,6 +254,24 @@ function handleReset(): void {
   dateRange.value = [];
   searchForm.value = { acctId: '', keyword: '' };
   reset();
+  void loadHealth();
+}
+
+/**
+ * 汇总行一键复制成报数文本：业务员在微信里给客户报"这段时间出了多少货"，
+ * 不用打开导出文件再手抄一遍
+ */
+async function copySummaryAsText(row: KdStatementSummaryResp): Promise<void> {
+  const range = row.firstDate && row.lastDate ? `${row.firstDate} ~ ${row.lastDate}` : '本期';
+  const text =
+    `【${row.customerName || '客户'}】${range} 出库 ${row.billCount} 单，合计金额 ¥${money(row.totalAmount)}` +
+    (row.acctId ? `（账套 ${row.acctId}）` : '');
+  try {
+    await navigator.clipboard.writeText(text);
+    ElMessage.success('已复制，可直接粘贴发给客户');
+  } catch {
+    ElMessage.warning('浏览器不允许自动复制，请手动记录');
+  }
 }
 
 async function openDetail(row: KdStatementSummaryResp): Promise<void> {
@@ -222,9 +324,17 @@ function money(value?: number | null): string {
   if (value == null) return '0.00';
   return Number(value).toFixed(2);
 }
+
+onMounted(() => {
+  void loadHealth();
+});
 </script>
 
 <style scoped lang="scss">
+.health-bar {
+  margin-bottom: 12px;
+}
+
 .money {
   font-variant-numeric: tabular-nums;
   font-weight: 600;

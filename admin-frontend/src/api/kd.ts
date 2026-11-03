@@ -16,6 +16,7 @@ import type {
   KdOutboundLineDataResp,
   KdOwnerResp,
   KdStatementDetailResp,
+  KdStatementHealthResp,
   KdStatementQuery,
   KdStatementSummaryResp,
   KdSyncBatchResp,
@@ -148,6 +149,11 @@ export const kdStatementApi = {
   /** 单客户明细 */
   detail(params: KdStatementQuery): Promise<KdStatementDetailResp> {
     return http.get<KdStatementDetailResp>('/kd/statement/detail', params);
+  },
+
+  /** 数据体检：本期无分录 / 作废 / 失效单据计数 */
+  health(params: KdStatementQuery): Promise<KdStatementHealthResp> {
+    return http.get<KdStatementHealthResp>('/kd/statement/health', params);
   },
 
   /** 导出 xlsx（客户汇总 + 出库明细） */
