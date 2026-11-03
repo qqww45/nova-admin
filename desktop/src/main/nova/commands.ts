@@ -67,8 +67,11 @@ async function handle(baseUrl: string, token: string, command: NovaCommand): Pro
   try {
     switch (command.command) {
       case 'sync.now': {
-        // 空 sinceDate = 全量；远程触发通常就是"账套里数据不对，重拉一遍"
-        const results = await runSync({ sinceDate: '' })
+        // payload='full' 才全量重拉（账套数据不对时的纠错手段）；
+        // 普通「立即同步」走自动模式：有水位增量、无水位全量，
+        // 不再每次点一下就把整个账套重拉一遍
+        const full = (command.payload || '').trim().toLowerCase() === 'full'
+        const results = await runSync({ sinceDate: full ? '' : undefined })
         const upload = await uploadToNova()
         message = `${results.map((r) => r.message).join('；')}；上行：${upload.message}`
         break

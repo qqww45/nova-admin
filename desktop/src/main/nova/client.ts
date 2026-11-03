@@ -230,6 +230,20 @@ export async function ackCommand(
   })
 }
 
+/**
+ * 字段自检结果回传：把自检拼出的分录字段集 / PO 字段写到本绑定的字段映射。
+ *
+ * <p>运维在网页「金蝶同步 → 同步配置」确认后下发 config.reload 生效，
+ * 砍掉"业务员复制报告给运维、运维手抄配置"的一次往返。
+ */
+export async function uploadMapping(
+  baseUrl: string,
+  token: string,
+  body: { lineFieldKeys?: string; customerPoField?: string; note?: string }
+): Promise<void> {
+  await request<void>(baseUrl, '/kd/sync/mapping', { method: 'POST', token, body })
+}
+
 /** 批次结束回报 */
 export async function finishBatch(
   baseUrl: string,

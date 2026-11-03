@@ -7,7 +7,9 @@ import HzButton from '../components/ui/HzButton.vue'
 import type { LastSyncStat, NovaState, SyncProgress } from '../../../shared/types'
 
 const router = useRouter()
-const sinceDate = ref(localStorage.getItem('hz.sinceDate') || '2025-01-01')
+// 双水位增量上线后默认自动（有水位增量、无水位全量）；
+// 日期框变成"纠错用的显式重拉起点"，留空即自动。旧存储键里的默认日期不再劫持新逻辑
+const sinceDate = ref(localStorage.getItem('hz.resyncDate') || '')
 const running = ref(false)
 const items = ref<SyncProgress[]>([
   { entity: 'customer', status: 'running', rowCount: 0, message: '等待开始' },
@@ -106,7 +108,7 @@ onUnmounted(() => {
 async function start() {
   running.value = true
   error.value = ''
-  localStorage.setItem('hz.sinceDate', sinceDate.value)
+  localStorage.setItem('hz.resyncDate', sinceDate.value)
   items.value = items.value.map((x) => ({
     ...x,
     status: 'running',
@@ -114,7 +116,10 @@ async function start() {
     message: '排队中…'
   }))
   try {
-    const res = await window.hengzhang.runSync({ sinceDate: sinceDate.value })
+    // 留空 = 自动：双水位增量（抓得到改过的历史单）；填了 = 从该业务日期显式重拉
+    const res = await window.hengzhang.runSync({
+      sinceDate: sinceDate.value || undefined
+    })
     items.value = res
     lastStats.value = await window.hengzhang.lastSyncStats()
   } catch (e) {
@@ -183,7 +188,7 @@ function statusLabel(s: SyncProgress['status']) {
     </div>
 
     <div class="toolbar panel rise">
-      <HzField label="起始业务日期" hint="首次可拉近 12～24 个月；之后可按需重拉">
+      <HzField label="从指定日期重拉（可选）" hint="留空 = 自动增量（推荐）：首次全量，之后只拉新增与修改过的单，改过的历史单也能抓到；填日期则从该业务日期起显式重拉（纠错用）">
         <input v-model="sinceDate" type="date" />
       </HzField>
       <div class="note">

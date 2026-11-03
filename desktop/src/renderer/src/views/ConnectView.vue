@@ -12,6 +12,7 @@ const saving = ref(false)
 const testing = ref(false)
 const detecting = ref(false)
 const probing = ref(false)
+const uploadingMapping = ref(false)
 const report = ref<ProbeReport | null>(null)
 const mapping = ref<MappingState | null>(null)
 const poField = ref('')
@@ -261,6 +262,27 @@ async function applyMapping() {
   }
 }
 
+/**
+ * 自检结果一键回传：写到服务端本绑定的字段映射，运维确认后下发 config.reload 生效。
+ * 不用再把报告复制给运维、运维手抄进配置页。
+ */
+async function uploadMappingToNova() {
+  if (!report.value?.suggestedLineFieldKeys) return
+  uploadingMapping.value = true
+  try {
+    const result = await window.hengzhang.uploadMapping({
+      lineFieldKeys: report.value.suggestedLineFieldKeys,
+      customerPoField: poField.value.trim() || undefined,
+      note: `字段自检回传 ${new Date().toLocaleString()}`
+    })
+    toast.value = { type: result.ok ? 'ok' : 'err', text: result.message }
+  } catch (e) {
+    toast.value = { type: 'err', text: e instanceof Error ? e.message : String(e) }
+  } finally {
+    uploadingMapping.value = false
+  }
+}
+
 async function resetMapping() {
   try {
     mapping.value = await window.hengzhang.resetMapping()
@@ -403,6 +425,14 @@ async function resetMapping() {
             @click="applyMapping"
           >
             应用到本机映射
+          </HzButton>
+          <HzButton
+            variant="ghost"
+            :disabled="!report.suggestedLineFieldKeys"
+            :loading="uploadingMapping"
+            @click="uploadMappingToNova"
+          >
+            上传到对账平台
           </HzButton>
           <HzButton variant="ghost" @click="resetMapping">恢复内置</HzButton>
         </span>

@@ -55,6 +55,8 @@ interface OutboundRow {
   status: string | null
   cancelled: number
   amount_cents: number
+  /** 金蝶 FModifyDate（双水位上线后有值；老数据为空） */
+  modify_time: string | null
   sync_at: string | null
 }
 
@@ -170,7 +172,7 @@ export async function uploadToNova(): Promise<NovaUploadResult> {
     .all(since) as CustomerRow[]
   const outbounds = db
     .prepare(
-      `SELECT fid, fbillno, fdate, customer_fid, customer_name, status, cancelled, amount_cents, sync_at
+      `SELECT fid, fbillno, fdate, customer_fid, customer_name, status, cancelled, amount_cents, modify_time, sync_at
        FROM outbound WHERE sync_at IS NOT NULL AND sync_at > ? ORDER BY sync_at`
     )
     .all(since) as OutboundRow[]
@@ -236,7 +238,8 @@ export async function uploadToNova(): Promise<NovaUploadResult> {
           docStatus: row.status || '',
           cancelStatus: row.cancelled ? 'B' : 'A',
           amountCents: Math.round(row.amount_cents || 0),
-          modifyTime: row.sync_at ? toLocalTime(row.sync_at) : undefined
+          // 金蝶 FModifyDate（服务端 kd_modify_time 的真实语义）；老数据退回本地写入时间
+          modifyTime: row.modify_time ? toLocalTime(row.modify_time) : row.sync_at ? toLocalTime(row.sync_at) : undefined
         }))
       })
       received += r.received

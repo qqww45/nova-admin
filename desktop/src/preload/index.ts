@@ -7,6 +7,7 @@ import type {
   ConnectionTestResult,
   CustomerOption,
   MappingApplyInput,
+  NovaMappingUploadInput,
   MappingState,
   NovaBindInput,
   NovaBindResult,
@@ -45,6 +46,9 @@ const api = {
   bindNova: (input: NovaBindInput): Promise<NovaBindResult> => ipcRenderer.invoke('nova:bind', input),
   unbindNova: (): Promise<NovaState> => ipcRenderer.invoke('nova:unbind'),
   uploadToNova: (): Promise<NovaUploadResult> => ipcRenderer.invoke('nova:upload'),
+  uploadMapping: (
+    input: NovaMappingUploadInput
+  ): Promise<{ ok: boolean; message: string }> => ipcRenderer.invoke('nova:uploadMapping', input),
   onNovaUpload: (cb: (r: NovaUploadResult) => void) => {
     const listener = (_: Electron.IpcRendererEvent, r: NovaUploadResult) => cb(r)
     ipcRenderer.on('nova:upload', listener)
