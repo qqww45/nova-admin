@@ -42,8 +42,8 @@ admin-backend/
     application.yml          主配置（安全默认值）
     application-dev.yml      开发环境覆盖
     application-prod.yml     生产环境
-    db/migration/            Flyway 迁移脚本（V1~V7）
-  src/test/java/             单元测试（72 个用例）
+    db/migration/            Flyway 迁移脚本（V1~V19）
+  src/test/java/             单元测试（180 个用例）
 
 admin-frontend/
   src/
@@ -60,11 +60,14 @@ desktop/         桌面采集器（Electron + Vue3，从金蝶同步数据上报
   resources/     字段映射等内置资源
 
 docs/
-  00-方案确认.md      原始需求
+  系统提示词-客户订单出货管理系统.md  业务系统产品规格（客户/订单/出货）
+  附录A-Excel模板与字段映射.md       Excel 导入导出模板与字段映射
   登录方案.md         双 Token 与设备信任设计
   人机验证方案.md     风险分层与滑块判定
   数据库字典.md       表结构与枚举
   系统日志设计.md     日志方案与分布式接入分析
+  金蝶对账同步方案.md  金蝶对账与数据同步整体方案
+  对账单与生产化设计.md  对账单功能与生产化加固设计
 ```
 
 ---
@@ -141,11 +144,11 @@ pnpm dev
 ### 5.4 运行测试
 
 ```bash
-# 后端单元测试（72 个用例）
+# 后端单元测试（180 个用例）
 mvn -f admin-backend/pom.xml test
 
 # 前端类型检查
-cd admin-frontend && pnpm type-check
+cd admin-frontend && pnpm typecheck
 ```
 
 ### 5.5 生产启动
