@@ -95,7 +95,7 @@ async function syncCustomers(sinceDate: string): Promise<SyncProgress> {
 /** 出库/订单完整字段以 M0 映射为准；字段集外置 outstock.json（用户目录优先），候选集自动降级 */
 type LineCol =
   | 'fid' | 'billNo' | 'date' | 'custFid' | 'custName' | 'status' | 'cancelled'
-  | 'entryId' | 'matNo' | 'matName' | 'unit' | 'qty' | 'price' | 'amount'
+  | 'entryId' | 'matNo' | 'matName' | 'spec' | 'unit' | 'qty' | 'price' | 'amount'
   | 'srcNo' | 'remark' | 'po' | 'other'
 
 function classifyLineToken(token: string, poField: string): LineCol {
@@ -111,6 +111,7 @@ function classifyLineToken(token: string, poField: string): LineCol {
   if (k === 'FENTRYID' || k === 'FENTITY_FENTRYID') return 'entryId'
   if (k === 'FMATERIALID.FNUMBER') return 'matNo'
   if (k === 'FMATERIALID.FNAME') return 'matName'
+  if (k === 'FMATERIALID.FSPECIFICATION' || k === 'FSPECIFICATION') return 'spec'
   if (k.endsWith('.FNAME') && k.includes('UNIT')) return 'unit'
   if (k === 'FREALQTY' || k === 'FQTY' || k === 'FSALQTY') return 'qty'
   if (k === 'FTAXPRICE' || k === 'FPRICE') return 'price'
@@ -157,10 +158,10 @@ async function syncOutboundLines(
 
       const insert = db.prepare(`
         INSERT INTO outbound_line(
-          outbound_fid, entry_id, material_number, material_name, unit,
+          outbound_fid, entry_id, material_number, material_name, spec, unit,
           qty_milli, price_cents, amount_cents, src_order_no, customer_po, remark, sync_at
         ) VALUES(
-          @outbound_fid, @entry_id, @material_number, @material_name, @unit,
+          @outbound_fid, @entry_id, @material_number, @material_name, @spec, @unit,
           @qty_milli, @price_cents, @amount_cents, @src_order_no, @customer_po, @remark, @sync_at
         )
       `)
@@ -196,6 +197,7 @@ async function syncOutboundLines(
               entry_id: rawEntryId > 0 ? rawEntryId : null,
               material_number: idx('matNo') >= 0 ? cellScalar(r[idx('matNo')]) : '',
               material_name: idx('matName') >= 0 ? cellScalar(r[idx('matName')]) : '',
+              spec: idx('spec') >= 0 ? cellScalar(r[idx('spec')]) : '',
               unit: idx('unit') >= 0 ? cellScalar(r[idx('unit')]) : '',
               qty_milli: Math.round(qty * 1000),
               price_cents: Math.round(price * 100),

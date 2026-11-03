@@ -63,6 +63,7 @@ interface LineRow {
   entry_id: number | null
   material_number: string | null
   material_name: string | null
+  spec: string | null
   unit: string | null
   qty_milli: number
   price_cents: number
@@ -175,7 +176,7 @@ export async function uploadToNova(): Promise<NovaUploadResult> {
     .all(since) as OutboundRow[]
   const lines = db
     .prepare(
-      `SELECT outbound_fid, entry_id, material_number, material_name, unit,
+      `SELECT outbound_fid, entry_id, material_number, material_name, spec, unit,
               qty_milli, price_cents, amount_cents, src_order_no, customer_po, remark, sync_at
        FROM outbound_line WHERE sync_at IS NOT NULL AND sync_at > ?
        ORDER BY outbound_fid, id`
@@ -262,6 +263,7 @@ export async function uploadToNova(): Promise<NovaUploadResult> {
           entryId: lineEntryIds[offset + i],
           materialNumber: row.material_number || '',
           materialName: row.material_name || '',
+          spec: row.spec || '',
           unit: row.unit || '',
           qtyMilli: Math.round(row.qty_milli || 0),
           priceCents: Math.round(row.price_cents || 0),
