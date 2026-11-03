@@ -54,7 +54,8 @@ async function onChangePasswordSubmit(payload: ResetPasswordSubmit): Promise<voi
   if (!payload.oldPassword) {
     return;
   }
-  await userApi.changePassword(payload.oldPassword, payload.newPassword);
+  // confirmPassword 服务端必填：缺了会得到「确认密码不能为空」而用户明明已填写
+  await userApi.changePassword(payload.oldPassword, payload.newPassword, payload.confirmPassword);
   ElMessage.success('密码修改成功');
   passwordDialogVisible.value = false;
 }
