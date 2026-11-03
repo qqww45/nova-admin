@@ -363,7 +363,7 @@ npm run build        # 构建（主进程/渲染进程）
 npm run dist:cn      # 本地打 Windows 安装包（走国内镜像）
 ```
 
-发版：推送 `desktop-v*` 标签（等于 `desktop/package.json` 版本）触发 `.github/workflows/release-desktop.yml`，产物发布到本仓库 Releases，客户端自动更新读取 `build.publish`（`qqww45/nova-admin`）。
+发版：推送 `desktop-v*` 标签（等于 `desktop/package.json` 版本）触发 `.github/workflows/release-desktop.yml`。仓库为私有仓库，客户端自动更新**不走 GitHub**（匿名访问会 404）：产物上传到上海服务器 `release/` 静态目录（`deploy/docker-compose.yml` 的 `update` 容器），客户端 `build.publish` 指向 `https://hz-release.s.ci64.com/`；GitHub Releases 仅作鉴权存档。详见 `desktop/README.md` 的「打包与发版」。
 
 ## 9. 已知边界
 

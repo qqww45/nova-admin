@@ -79,8 +79,8 @@ async function install() {
 
       <article class="panel rise" style="animation-delay: 0.08s">
         <div class="kicker">更新通道</div>
-        <h3>GitHub Releases</h3>
-        <p>公开仓库 · latest.yml · 用户确认后下载安装</p>
+        <h3>衡账发布源</h3>
+        <p>自有静态服务器 · latest.yml · 用户确认后下载安装</p>
         <div v-if="status.downloading" class="bar">
           <div class="fill" :style="{ width: `${status.progress || 0}%` }" />
         </div>
@@ -166,6 +166,7 @@ code {
 .err {
   margin-top: 12px;
   color: #ffc2c9;
+  word-break: break-all;
 }
 .ok {
   margin-top: 12px;
