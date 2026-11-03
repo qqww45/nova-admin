@@ -170,11 +170,25 @@ function messageOf(error: unknown): string {
   return err.code === CODE_CREDENTIAL_ERROR ? CREDENTIAL_ERROR : err.message || '登录失败，请稍后再试';
 }
 
+/**
+ * 演示凭据：只在开发构建中存在。
+ *
+ * <p>生产构建会把 {@code import.meta.env.DEV} 替换为 {@code false}，
+ * 下面的三元式经死代码消除后，凭据字符串不会进入前端产物——
+ * 只靠 {@code v-if} 在运行时隐藏是不够的：字符串本体仍会被打进 bundle。
+ * 同理，占位符与页面提示也必须从这些常量取值，而不是把明文写死在模板里。
+ */
+const demoUsername = import.meta.env.DEV ? 'admin' : '';
+const demoPassword = import.meta.env.DEV ? 'admin123' : '';
+/** 输入框占位符：开发构建提示演示凭据，生产构建为中性文案 */
+const usernamePlaceholder = import.meta.env.DEV ? `用户名：${demoUsername}` : '请输入用户名';
+const passwordPlaceholder = import.meta.env.DEV ? `密码：${demoPassword}` : '请输入密码';
+
 const form = reactive({
   // 演示账号只在开发环境预填：生产构建若保留默认值，等于把可用凭据写进前端产物，
   // 且登录页一打开就自动填好了（配合弱口令就是直接可用的入口）。
-  username: import.meta.env.DEV ? 'admin' : '',
-  password: import.meta.env.DEV ? 'admin123' : '',
+  username: demoUsername,
+  password: demoPassword,
   /** 是否信任此设备：默认勾选 */
   trustDevice: true,
 });
@@ -413,7 +427,7 @@ async function handleLogin(quiet = false): Promise<void> {
           <el-form-item prop="username">
             <el-input
               v-model="form.username"
-              placeholder="用户名：admin"
+              :placeholder="usernamePlaceholder"
               autocomplete="username"
               :prefix-icon="'User'"
             />
@@ -424,7 +438,7 @@ async function handleLogin(quiet = false): Promise<void> {
               type="password"
               show-password
               autocomplete="current-password"
-              placeholder="密码：admin123"
+              :placeholder="passwordPlaceholder"
               :prefix-icon="'Lock'"
             />
           </el-form-item>
@@ -513,7 +527,8 @@ async function handleLogin(quiet = false): Promise<void> {
           </el-button>
         </el-form>
 
-        <p class="login__tip">演示账号 <code>admin</code> / <code>admin123</code></p>
+        <!-- 演示凭据提示仅开发构建渲染：凭据本体来自上面的常量，生产构建经 DCE 不进产物 -->
+        <p v-if="demoUsername" class="login__tip">演示账号 <code>{{ demoUsername }}</code> / <code>{{ demoPassword }}</code></p>
       </section>
 
       <!-- 右：抽象轨道装饰。纯 CSS、无文字，永不随业务变化 -->
