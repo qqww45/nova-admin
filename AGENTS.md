@@ -10,7 +10,7 @@ Project-specific guidance for OpenCode sessions.
 - The repo started as a generic admin scaffold. Active product work is the **客户 / 订单 / 出货** system.
   Read `docs/系统提示词-客户订单出货管理系统.md` and `docs/附录A-Excel模板与字段映射.md` before changing business code.
 - `README.md` is partly stale: it says 72 tests, migrations V1–V7, and `pnpm type-check`.
-  Actual: **148 tests**, migrations through **V12**, script is **`pnpm typecheck`**.
+ Actual: **198 tests**, migrations through **V20**, script is **`pnpm typecheck`**.
 
 ## Commands (Windows / PowerShell)
 

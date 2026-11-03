@@ -2,6 +2,7 @@ package com.example.admin.infrastructure.persistence.repository;
 
 import cn.hutool.core.collection.ListUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.example.admin.domain.model.kd.KdCustomer;
 import com.example.admin.domain.model.kd.KdOutbound;
 import com.example.admin.domain.model.kd.KdOutboundLine;
 import com.example.admin.domain.repository.KdStatementRepository;
@@ -82,6 +83,20 @@ public class KdStatementRepositoryImpl implements KdStatementRepository {
             }
         }
         return result;
+    }
+
+    @Override
+    public KdCustomer findCustomer(Long ownerUserId, String acctId, Long customerFid) {
+        if (customerFid == null) {
+            return null;
+        }
+        KdCustomerPo po = customerMapper.selectOne(new LambdaQueryWrapper<KdCustomerPo>()
+                .eq(ownerUserId != null, KdCustomerPo::getOwnerUserId, ownerUserId)
+                .eq(acctId != null && !acctId.isBlank(), KdCustomerPo::getAcctId, acctId)
+                .eq(KdCustomerPo::getKdFid, customerFid)
+                .orderByDesc(KdCustomerPo::getSyncAt)
+                .last("LIMIT 1"));
+        return po == null ? null : converter.customerToDomain(po);
     }
 
     @Override

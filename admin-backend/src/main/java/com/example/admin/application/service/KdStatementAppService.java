@@ -35,12 +35,16 @@ public interface KdStatementAppService {
     KdStatementDetailResp detail(KdStatementQuery query);
 
     /**
-     * 导出 xlsx（汇总 + 明细两个工作表）。
+     * 导出对账单 xlsx。
      *
-     * @param query 查询条件
-     * @return 文件字节
+     * <p>版式与「一恒科—鸿晟达」金样板完全一致（合并、列序、行高、字体、配色、
+     * 页脚合计公式、A4 横向打印、公司 Logo）。每个客户按物料编号拆成一个 sheet，
+     * 单客户单物料时即样板原样。无分录的单据退回表头金额并标注。
+     *
+     * @param query 查询条件（可限定客户，不限定则导出范围内全部客户）
+     * @return 文件名 + xlsx 字节
      */
-    byte[] export(KdStatementQuery query);
+    KdStatementExport export(KdStatementQuery query);
 
     /**
      * 数据体检：解释"本期为什么对账单少数据 / 金额对不上"。

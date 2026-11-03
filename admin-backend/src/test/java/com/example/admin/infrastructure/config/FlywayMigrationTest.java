@@ -72,6 +72,23 @@ class FlywayMigrationTest {
                             "出库分录任务模板应包含规格型号字段 FMaterialId.FSpecification");
                 }
 
+                // V20：对账单抬头公司信息进配置、分录字段集补规格（FMaterialId.FSpecification）。
+                // 导出版式以金样板为准，抬头文本默认值与样板逐字一致；规格列缺了整条链路都填不出来。
+                for (String key : new String[]{"kd.statement.company.name", "kd.statement.company.name-en",
+                        "kd.statement.company.info"}) {
+                    try (var rs = stmt.executeQuery(
+                            "SELECT COUNT(*) FROM sys_config WHERE config_key = '" + key + "'")) {
+                        rs.next();
+                        assertEquals(1, rs.getInt(1), "对账单抬头配置缺失：" + key);
+                    }
+                }
+                try (var rs = stmt.executeQuery(
+                        "SELECT field_keys FROM kd_sync_task WHERE entity = 'outbound_line' AND acct_id = '*'")) {
+                    rs.next();
+                    assertTrue(rs.getString(1).contains("FMaterialId.FSpecification"),
+                            "分录字段集应包含物料规格字段");
+                }
+
                 // 业务员（role_id=3）必须拿到对账单与绑定/批次的查询、导出、指令权限：
                 // V16/V17 只授权给管理员角色时，功能对真正的使用者（业务员）整体不可用
                 // ——页面不可达 + 接口 403。此断言锁定 V18 的授权不被后续迁移悄悄拿掉。

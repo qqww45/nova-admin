@@ -1,6 +1,7 @@
 package com.example.admin.interfaces.controller;
 
 import com.example.admin.application.service.KdStatementAppService;
+import com.example.admin.application.service.KdStatementExport;
 import com.example.admin.common.result.PageResult;
 import com.example.admin.common.result.R;
 import com.example.admin.interfaces.dto.req.KdStatementQuery;
@@ -64,6 +65,25 @@ public class KdStatementController {
     }
 
     /**
+     * 导出 xlsx（版式与金样板完全一致）。
+     *
+     * @param query 查询条件
+     * @param response 响应（直接写流，与既有导出保持一致）
+     * @throws IOException 写流失败
+     */
+    @Operation(summary = "导出对账单", description = "按客户 × 物料分 sheet 导出，版式与签字样板一致")
+    @GetMapping("/export")
+    @PreAuthorize("@ss.hasPermi('kd:statement:export')")
+    public void export(@Valid KdStatementQuery query, HttpServletResponse response) throws IOException {
+        KdStatementExport file = statementAppService.export(query);
+        response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        response.setHeader("Content-Disposition", "attachment; filename="
+                + URLEncoder.encode(file.fileName(), StandardCharsets.UTF_8));
+        response.setContentLength(file.content().length);
+        response.getOutputStream().write(file.content());
+    }
+
+    /**
      * 数据体检：解释"本期为什么对账单少数据 / 金额对不上"。
      *
      * <p>统计窗口内三类不进对账单的单据：无分录（退回表头金额）、作废、失效。
@@ -78,26 +98,5 @@ public class KdStatementController {
     @PreAuthorize("@ss.hasPermi('kd:statement:list')")
     public R<KdStatementHealthResp> health(@Valid KdStatementQuery query) {
         return R.ok(statementAppService.health(query));
-    }
-
-    /**
-     * 导出 xlsx。
-     *
-     * @param query 查询条件
-     * @param response 响应（直接写流，与既有导出保持一致）
-     * @throws IOException 写流失败
-     */
-    @Operation(summary = "导出对账单", description = "导出客户汇总 + 出库明细两个工作表")
-    @GetMapping("/export")
-    @PreAuthorize("@ss.hasPermi('kd:statement:export')")
-    public void export(@Valid KdStatementQuery query, HttpServletResponse response) throws IOException {
-        byte[] bytes = statementAppService.export(query);
-        String fileName = "金蝶对账单-" + (query.getDateFrom() == null ? "" : query.getDateFrom())
-                + "_" + (query.getDateTo() == null ? "" : query.getDateTo());
-        response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-        response.setHeader("Content-Disposition", "attachment; filename="
-                + URLEncoder.encode(fileName, StandardCharsets.UTF_8) + ".xlsx");
-        response.setContentLength(bytes.length);
-        response.getOutputStream().write(bytes);
     }
 }

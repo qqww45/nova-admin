@@ -155,8 +155,8 @@ function migrate(database: Database.Database) {
       .run(String(SCHEMA_VERSION))
   }
 
-  // v3：规格型号。服务端 kd_outbound_line.spec、对账单导出的「规格型号」列、
-  // 数据查看页的 spec 列此前从未有数据——采集侧整条链路没采这个字段。
+  // v3：补「规格」列。对账单（金样板）明细的规格列需要 FMaterialId.FSpecification，
+  // 此前整条链路（采集 → 落库 → 导出）都没有采集该字段，导出的规格永远为空。
   // 老库补列后为 NULL，下一次全量同步（分录按单 DELETE+INSERT 重建）会自动回填。
   if (current < 3) {
     const cols = database.prepare(`PRAGMA table_info(outbound_line)`).all() as Array<{ name: string }>

@@ -1,6 +1,6 @@
 {
   "name": "hengzhang",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "衡账 — 金蝶云·星空独立对账桌面工具",
   "main": "./out/main/index.js",
   "author": "一恒科",

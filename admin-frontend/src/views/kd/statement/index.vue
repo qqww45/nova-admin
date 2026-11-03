@@ -393,16 +393,22 @@ async function exportCurrentCustomer(): Promise<void> {
   await exportCustomer(detail.value.acctId, detail.value.customerFid);
 }
 
-/** 单客户导出（桌面明细抽屉与移动卡片共用） */
+/** 单客户导出（桌面明细抽屉与移动卡片共用；文件名与服务端命名口径一致） */
 async function exportCustomer(acctId?: string, customerFid?: string): Promise<void> {
   if (!customerFid) return;
   exportingDetail.value = true;
   try {
-    await kdStatementApi.export({
-      ...currentQuery(),
-      acctId: acctId || currentQuery().acctId,
-      customerFid,
-    });
+    const range = `${currentQuery().dateFrom || '起'}_${currentQuery().dateTo || '今'}`;
+    const name = detail.value?.customerName;
+    const fileName = name ? `对账单-${name}-${range}.xlsx` : undefined;
+    await kdStatementApi.export(
+      {
+        ...currentQuery(),
+        acctId: acctId || currentQuery().acctId,
+        customerFid,
+      },
+      fileName,
+    );
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : String(e));
   } finally {
