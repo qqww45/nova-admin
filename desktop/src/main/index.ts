@@ -7,6 +7,7 @@ import { refreshTasks } from './nova/tasks'
 import { closeDb } from './db'
 import { getUserRoots } from './paths'
 import { initTray, markQuitting, stopAutoSync } from './tray'
+import { preferIpv4Loopback, waitForHttpOk, buildStartupErrorHtml } from './devRenderer'
 
 function isDev() {
   return !app.isPackaged
@@ -36,7 +37,7 @@ function createWindow() {
   })
 
   win.on('ready-to-show', () => {
-    win.show()
+    if (!win.isDestroyed()) win.show()
   })
 
   win.webContents.setWindowOpenHandler((details) => {
@@ -44,11 +45,35 @@ function createWindow() {
     return { action: 'deny' }
   })
 
+  void loadRenderer(win)
+}
+
+/** 开发态等 Vite 可连再 load；失败则显示说明页，避免只剩标题栏底色 */
+async function loadRenderer(win: BrowserWindow) {
   if (isDev() && process.env['ELECTRON_RENDERER_URL']) {
-    win.loadURL(process.env['ELECTRON_RENDERER_URL'])
-  } else {
-    win.loadFile(join(__dirname, '../renderer/index.html'))
+    const url = preferIpv4Loopback(process.env['ELECTRON_RENDERER_URL'])
+    const ready = await waitForHttpOk(url)
+    if (win.isDestroyed()) return
+    if (!ready) {
+      await showDevStartupError(win, url, 'ERR_CONNECTION_REFUSED：开发服务器未在该地址监听。')
+      return
+    }
+    try {
+      await win.loadURL(url)
+    } catch (e) {
+      if (win.isDestroyed()) return
+      await showDevStartupError(win, url, e instanceof Error ? e.message : String(e))
+    }
+    return
   }
+  await win.loadFile(join(__dirname, '../renderer/index.html'))
+}
+
+async function showDevStartupError(win: BrowserWindow, url: string, error: string) {
+  await win.loadURL(
+    'data:text/html;charset=utf-8,' + encodeURIComponent(buildStartupErrorHtml({ url, error }))
+  )
+  if (!win.isDestroyed()) win.show()
 }
 
 app.whenReady().then(() => {

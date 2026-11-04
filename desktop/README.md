@@ -10,11 +10,22 @@
 
 ## 开发
 
+必须用 `npm run dev`（electron-vite 会先编译主进程、拉起 Vite，再启动窗口）。不要直接 `electron .` / `npx electron .`，否则会连不上 `http://127.0.0.1:5173`，窗口只剩深色标题栏。
+
 ```bash
 npm install
 npm run rebuild
 npm run dev
 ```
+
+Windows 控制台中文乱码时，先切 UTF-8 再启动：
+
+```bat
+chcp 65001
+npm run dev
+```
+
+控制台里 `Unable to create cache` / `Gpu Cache Creation failed` / `Unable to move the cache ... (0x5)` 是 Chromium GPU 磁盘缓存的权限噪音（常见于中文 Windows），一般可忽略；真正导致空白窗口的是后面的 `Failed to load URL ... ERR_CONNECTION_REFUSED`。
 
 ## M0 探针
 

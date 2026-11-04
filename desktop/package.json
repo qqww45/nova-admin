@@ -8,6 +8,7 @@
   "private": true,
   "scripts": {
     "dev": "electron-vite dev",
+    "test": "node --experimental-strip-types --test src/main/devRenderer.test.mjs",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "pack": "npm run build && electron-builder --dir",
