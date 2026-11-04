@@ -72,3 +72,5 @@ npm run dist        # 或 dist:cn（走国内镜像下载 Electron / builder 二
 > 存量 1.2.1 及更早客户端内嵌的是 GitHub 源配置，**无法远程修复**：需手动安装一次新版完整安装包，之后回到自动更新通道。
 
 安装包为 NSIS；数据在 `%LOCALAPPDATA%\衡账\`，更新覆盖程序文件、不动数据。
+
+窗口 / 托盘 / 安装包快捷方式图标在 `resources/icon.svg`（源）、`resources/icon.png`、`resources/icon.ico`（16–256）。改标后在本目录跑 `python3 scripts/make-icon.py` 再打包。

@@ -5,7 +5,7 @@ import { initUpdater, checkForUpdatesSilent } from './updater'
 import { startCommandLoop, stopCommandLoop } from './nova/commands'
 import { refreshTasks } from './nova/tasks'
 import { closeDb } from './db'
-import { getUserRoots } from './paths'
+import { getUserRoots, getAppIconPath } from './paths'
 import { initTray, markQuitting, stopAutoSync } from './tray'
 import { preferIpv4Loopback, waitForHttpOk, buildStartupErrorHtml } from './devRenderer'
 
@@ -21,6 +21,7 @@ function createWindow() {
     minHeight: 720,
     show: false,
     title: '衡账',
+    icon: getAppIconPath('icon.png'),
     backgroundColor: '#0B1220',
     titleBarStyle: 'hidden',
     titleBarOverlay: {
@@ -77,6 +78,9 @@ async function showDevStartupError(win: BrowserWindow, url: string, error: strin
 }
 
 app.whenReady().then(() => {
+  if (process.platform === 'win32') {
+    app.setAppUserModelId('com.yihengke.hengzhang')
+  }
   getUserRoots()
   registerIpc()
   initUpdater()

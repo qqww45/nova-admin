@@ -1,5 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { existsSync, readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { preferIpv4Loopback, waitForHttpOk, buildStartupErrorHtml } from './devRenderer.ts'
 
 test('preferIpv4Loopback 把 localhost 改成 127.0.0.1，避免 Windows 上 IPv6 监听、IPv4 连接被拒', () => {
@@ -55,4 +57,22 @@ test('buildStartupErrorHtml 给出可操作的中文说明并转义 URL', () => 
   assert.match(html, /衡账/)
   assert.doesNotMatch(html, /<\/script>/)
   assert.match(html, /127\.0\.0\.1:5173/)
+})
+
+test('品牌图标 PNG/SVG/ICO 齐全，ico 含 256（安装包/快捷方式）', () => {
+  const dir = resolve(import.meta.dirname, '../../resources')
+  assert.equal(existsSync(resolve(dir, 'icon.svg')), true)
+  assert.equal(existsSync(resolve(dir, 'icon.png')), true)
+  const icoPath = resolve(dir, 'icon.ico')
+  assert.equal(existsSync(icoPath), true)
+  const ico = readFileSync(icoPath)
+  assert.equal(ico.readUInt16LE(0), 0)
+  assert.equal(ico.readUInt16LE(2), 1)
+  const count = ico.readUInt16LE(4)
+  assert.ok(count >= 6, `ico entries ${count}`)
+  let has256 = false
+  for (let i = 0; i < count; i++) {
+    if (ico[6 + i * 16] === 0) has256 = true
+  }
+  assert.equal(has256, true)
 })

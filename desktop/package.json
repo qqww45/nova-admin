@@ -63,6 +63,7 @@
       }
     ],
     "win": {
+      "icon": "resources/icon.ico",
       "artifactName": "hengzhang-setup-${version}.${ext}",
       "target": [
         "nsis"
@@ -73,7 +74,10 @@
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": false,
-      "shortcutName": "衡账"
+      "shortcutName": "衡账",
+      "installerIcon": "resources/icon.ico",
+      "uninstallerIcon": "resources/icon.ico",
+      "installerHeaderIcon": "resources/icon.ico"
     }
   }
 }
