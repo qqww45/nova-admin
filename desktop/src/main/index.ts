@@ -61,10 +61,12 @@ app.whenReady().then(() => {
   // 启动即拉一次任务清单：字段集配置可能已被运维改过
   void refreshTasks()
 
-  // 托盘常驻 + 定时同步 + 开机自启（仅打包后；开发模式关窗即退）
+  // 托盘常驻 + 关窗隐藏 + 定时同步（开发模式同样启用，便于验证托盘行为；
+  // 系统不支持托盘时自动退回"关窗即退"）
+  void initTray()
+
+  // 业务员电脑重启后采集器自动拉起（方案 §8）；托盘菜单可随时关掉（仅打包后）
   if (app.isPackaged) {
-    void initTray(() => BrowserWindow.getAllWindows()[0] ?? null)
-    // 业务员电脑重启后采集器自动拉起（方案 §8）；托盘菜单可随时关掉
     app.setLoginItemSettings({ openAtLogin: true })
   }
 

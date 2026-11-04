@@ -5,7 +5,7 @@ import { getUserRoots } from './paths'
 
 let db: Database.Database | null = null
 
-const SCHEMA_VERSION = 4
+const SCHEMA_VERSION = 5
 
 export function getDb(): Database.Database {
   if (db) return db
@@ -173,6 +173,31 @@ function migrate(database: Database.Database) {
     const cols = database.prepare(`PRAGMA table_info(outbound)`).all() as Array<{ name: string }>
     const has = (name: string) => cols.some((c) => c.name === name)
     if (!has('modify_time')) database.exec(`ALTER TABLE outbound ADD COLUMN modify_time TEXT`)
+    database
+      .prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`)
+      .run(String(SCHEMA_VERSION))
+  }
+
+  // v5：同步可视化。sync_run 补 source 列（手动 / 托盘定时 / 远程指令），
+  // 新增 nova_upload_run 表记录每次上行批次（此前只存最后一次结果，历史无从看起）。
+  // 老数据 source 为 NULL，历史页显示为「—」。
+  if (current < 5) {
+    const cols = database.prepare(`PRAGMA table_info(sync_run)`).all() as Array<{ name: string }>
+    const has = (name: string) => cols.some((c) => c.name === name)
+    if (!has('source')) database.exec(`ALTER TABLE sync_run ADD COLUMN source TEXT`)
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS nova_upload_run (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        batch_id TEXT,
+        status TEXT NOT NULL,
+        message TEXT,
+        received INTEGER DEFAULT 0,
+        upserted INTEGER DEFAULT 0,
+        skipped INTEGER DEFAULT 0,
+        started_at TEXT,
+        finished_at TEXT
+      );
+    `)
     database
       .prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`)
       .run(String(SCHEMA_VERSION))

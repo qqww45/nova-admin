@@ -8,7 +8,14 @@ import { loadOutstockMapping } from '../mappingStore'
 import { serverLineFieldKeys } from '../nova/tasks'
 import { tryAcquire, release } from '../businessLock'
 import { decideSyncFilter, maxKdTime, normalizeKdTime } from './filter'
-import type { LastSyncStat, SyncEntity, SyncProgress, SyncStartInput } from '../../shared/types'
+import type {
+  LastSyncStat,
+  SyncEntity,
+  SyncProgress,
+  SyncRunRecord,
+  SyncStartInput,
+  SyncTrigger
+} from '../../shared/types'
 
 function emit(progress: SyncProgress) {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -38,13 +45,13 @@ function setMeta(key: string, value: string) {
     .run(key, value)
 }
 
-async function syncCustomers(sinceDate: string): Promise<SyncProgress> {
+async function syncCustomers(sinceDate: string, trigger: SyncTrigger): Promise<SyncProgress> {
   const client = getKingdee()
   const db = getDb()
   const started = nowIso()
   db.prepare(
-    `INSERT INTO sync_run(entity, status, row_count, message, started_at) VALUES(?,?,?,?,?)`
-  ).run('customer', 'running', 0, '', started)
+    `INSERT INTO sync_run(entity, status, row_count, message, started_at, source) VALUES(?,?,?,?,?,?)`
+  ).run('customer', 'running', 0, '', started, trigger)
 
   try {
     const fieldKeys = 'FCUSTID,FNumber,FName,FADDRESS,FForbidStatus'
@@ -273,13 +280,13 @@ async function syncOutboundLines(
   throw lastErr instanceof Error ? lastErr : new Error(String(lastErr))
 }
 
-async function syncOutbound(sinceDate: string | undefined): Promise<SyncProgress> {
+async function syncOutbound(sinceDate: string | undefined, trigger: SyncTrigger): Promise<SyncProgress> {
   const client = getKingdee()
   const db = getDb()
   const started = nowIso()
   db.prepare(
-    `INSERT INTO sync_run(entity, status, row_count, message, started_at) VALUES(?,?,?,?,?)`
-  ).run('outbound', 'running', 0, '', started)
+    `INSERT INTO sync_run(entity, status, row_count, message, started_at, source) VALUES(?,?,?,?,?,?)`
+  ).run('outbound', 'running', 0, '', started, trigger)
 
   try {
     const acctId = getPublicConfig().acctId || ''
@@ -427,13 +434,13 @@ async function syncOutbound(sinceDate: string | undefined): Promise<SyncProgress
   }
 }
 
-async function syncSaleOrders(sinceDate: string): Promise<SyncProgress> {
+async function syncSaleOrders(sinceDate: string, trigger: SyncTrigger): Promise<SyncProgress> {
   const client = getKingdee()
   const db = getDb()
   const started = nowIso()
   db.prepare(
-    `INSERT INTO sync_run(entity, status, row_count, message, started_at) VALUES(?,?,?,?,?)`
-  ).run('sale_order', 'running', 0, '', started)
+    `INSERT INTO sync_run(entity, status, row_count, message, started_at, source) VALUES(?,?,?,?,?,?)`
+  ).run('sale_order', 'running', 0, '', started, trigger)
 
   try {
     const filter = sinceDate ? `FDate>='${sinceDate}'` : ''
@@ -508,6 +515,7 @@ export async function runSync(input: SyncStartInput): Promise<SyncProgress[]> {
   if (!tryAcquire('sync')) {
     throw new Error('已有同步或其它任务进行中')
   }
+  const trigger: SyncTrigger = input.trigger || 'manual'
   const results: SyncProgress[] = []
   try {
     const login = await getKingdee().login()
@@ -517,9 +525,9 @@ export async function runSync(input: SyncStartInput): Promise<SyncProgress[]> {
     for (const entity of order) {
       emit({ entity, status: 'running', rowCount: 0, message: '同步中…' })
       let progress: SyncProgress
-      if (entity === 'customer') progress = await syncCustomers(input.sinceDate || '')
-      else if (entity === 'sale_order') progress = await syncSaleOrders(input.sinceDate || '')
-      else progress = await syncOutbound(input.sinceDate)
+      if (entity === 'customer') progress = await syncCustomers(input.sinceDate || '', trigger)
+      else if (entity === 'sale_order') progress = await syncSaleOrders(input.sinceDate || '', trigger)
+      else progress = await syncOutbound(input.sinceDate, trigger)
       results.push(progress)
       emit(progress)
     }
@@ -571,4 +579,44 @@ export function lastSyncStats(): LastSyncStat[] {
       finishedAt: r.finishedAt
     }))
     .sort((a, b) => order.indexOf(a.entity) - order.indexOf(b.entity))
+}
+
+/**
+ * 同步历史（含失败与定时 / 指令触发），新到旧。
+ *
+ * <p>「进行中」行通常是崩溃残留——保留展示，让断档现场可见。
+ */
+export function syncHistory(limit = 100): SyncRunRecord[] {
+  const db = getDb()
+  const rows = db
+    .prepare(
+      `
+      SELECT id, entity, status, row_count AS rowCount, message,
+             started_at AS startedAt, finished_at AS finishedAt, source
+      FROM sync_run
+      ORDER BY id DESC
+      LIMIT ?
+    `
+    )
+    .all(Math.max(1, Math.min(500, limit))) as Array<{
+    id: number
+    entity: string
+    status: string
+    rowCount: number
+    message: string
+    startedAt: string | null
+    finishedAt: string | null
+    source: string | null
+  }>
+
+  return rows.map((r) => ({
+    id: r.id,
+    entity: r.entity,
+    status: r.status as SyncRunRecord['status'],
+    rowCount: Number(r.rowCount) || 0,
+    message: String(r.message || ''),
+    startedAt: r.startedAt,
+    finishedAt: r.finishedAt,
+    source: (r.source as SyncTrigger | null) || null
+  }))
 }
