@@ -168,6 +168,7 @@ public class KdBindingAppServiceImpl implements KdBindingAppService {
             if (binding.getAcctId() != null) {
                 resp.setCustomerCount(customerRepository.countByOwner(binding.getUserId(), binding.getAcctId()));
                 resp.setOutboundCount(outboundRepository.countByOwner(binding.getUserId(), binding.getAcctId()));
+                fillSyncDisplay(resp, binding);
             }
             result.add(resp);
         }
@@ -215,6 +216,44 @@ public class KdBindingAppServiceImpl implements KdBindingAppService {
             throw new BusinessException(ResultCode.DATA_NOT_FOUND, "绑定不存在");
         }
         return binding;
+    }
+
+    /**
+     * 绑定表水位 / 上次同步为空时，用已落库数据回填展示字段。
+     *
+     * <p>采集器 1.2.x 上报客户/出库块时不带 {@code watermarkTo}，绑定行上的水位列
+     * 从未被推进；批次 finish 若因 ISO 时间解析失败，{@code last_sync_at} 也不会写上。
+     * 但客户/出库行已经落库（列表「客户 / 出库」计数有值），这里取真实的
+     * {@code sync_at} / {@code kd_modify_time}，避免页面显示「—」「从未同步」。
+     *
+     * @param resp 列表项
+     * @param binding 绑定
+     */
+    private void fillSyncDisplay(KdBindingResp resp, KdBinding binding) {
+        boolean needCustomerWm = resp.getWatermarkCustomer() == null;
+        boolean needOutboundWm = resp.getWatermarkOutbound() == null;
+        boolean needLastSync = resp.getLastSyncAt() == null;
+        if (!needCustomerWm && !needOutboundWm && !needLastSync) {
+            return;
+        }
+        LocalDateTime customerSync = null;
+        LocalDateTime outboundSync = null;
+        if (needCustomerWm || needLastSync) {
+            customerSync = customerRepository.maxSyncAt(binding.getUserId(), binding.getAcctId());
+        }
+        if (needOutboundWm || needLastSync) {
+            outboundSync = outboundRepository.maxSyncAt(binding.getUserId(), binding.getAcctId());
+        }
+        if (needCustomerWm) {
+            resp.setWatermarkCustomer(customerSync);
+        }
+        if (needOutboundWm) {
+            LocalDateTime modifyTime = outboundRepository.maxModifyTime(binding.getUserId(), binding.getAcctId());
+            resp.setWatermarkOutbound(modifyTime != null ? modifyTime : outboundSync);
+        }
+        if (needLastSync) {
+            resp.setLastSyncAt(KdBinding.maxWatermark(customerSync, outboundSync));
+        }
     }
 
     /**

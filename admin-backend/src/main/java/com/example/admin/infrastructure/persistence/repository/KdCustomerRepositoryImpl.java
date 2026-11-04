@@ -77,6 +77,21 @@ public class KdCustomerRepositoryImpl implements KdCustomerRepository {
                 .eq(KdCustomerPo::getAcctId, acctId));
     }
 
+    @Override
+    public LocalDateTime maxSyncAt(Long ownerUserId, String acctId) {
+        if (ownerUserId == null || acctId == null || acctId.isBlank()) {
+            return null;
+        }
+        KdCustomerPo po = customerMapper.selectOne(new LambdaQueryWrapper<KdCustomerPo>()
+                .select(KdCustomerPo::getSyncAt)
+                .eq(KdCustomerPo::getOwnerUserId, ownerUserId)
+                .eq(KdCustomerPo::getAcctId, acctId)
+                .isNotNull(KdCustomerPo::getSyncAt)
+                .orderByDesc(KdCustomerPo::getSyncAt)
+                .last("LIMIT 1"));
+        return po == null ? null : po.getSyncAt();
+    }
+
     /**
      * 批量查已存在的主键。
      *

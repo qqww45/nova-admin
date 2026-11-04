@@ -172,6 +172,7 @@ public class KdSyncAppServiceImpl implements KdSyncAppService {
                 principal.userId(), principal.acctId(), req.getBatchId(), rows);
         accumulateBatch(req.getBatchId(), result);
         LocalDateTime watermark = advanceWatermark(principal.bindingId(), ENTITY_CUSTOMER, req.getWatermarkTo());
+        touchLastSync(principal.bindingId());
         return toResult(result, watermark);
     }
 
@@ -202,6 +203,7 @@ public class KdSyncAppServiceImpl implements KdSyncAppService {
                 principal.userId(), principal.acctId(), req.getBatchId(), rows);
         accumulateBatch(req.getBatchId(), result);
         LocalDateTime watermark = advanceWatermark(principal.bindingId(), ENTITY_OUTBOUND, req.getWatermarkTo());
+        touchLastSync(principal.bindingId());
         return toResult(result, watermark);
     }
 
@@ -240,6 +242,7 @@ public class KdSyncAppServiceImpl implements KdSyncAppService {
         // 表头金额以分录为准：客户端上报的头金额可能为空或未税
         outboundRepository.recalculateAmountByBatch(principal.userId(), principal.acctId(), req.getBatchId());
         LocalDateTime watermark = advanceWatermark(principal.bindingId(), ENTITY_OUTBOUND_LINE, req.getWatermarkTo());
+        touchLastSync(principal.bindingId());
         return toResult(result, watermark);
     }
 
@@ -400,6 +403,22 @@ public class KdSyncAppServiceImpl implements KdSyncAppService {
         update.setUpsertCount((batch.getUpsertCount() == null ? 0 : batch.getUpsertCount()) + result.upserted());
         update.setSkippedCount((batch.getSkippedCount() == null ? 0 : batch.getSkippedCount()) + result.skipped());
         batchRepository.update(update);
+    }
+
+    /**
+     * 数据落库即记一次成功同步时间。
+     *
+     * <p>采集器 1.2.1 曾把 ISO Instant 写进 finish，整批数据已入库但 finish 被拒，
+     * 绑定行 {@code last_sync_at} 一直为空。行上报成功后先落这个字段，
+     * finish 再补结果摘要；页面不再把「有数据」显示成「从未同步」。
+     *
+     * @param bindingId 绑定 ID
+     */
+    private void touchLastSync(Long bindingId) {
+        KdBinding update = new KdBinding();
+        update.setId(bindingId);
+        update.setLastSyncAt(LocalDateTime.now());
+        bindingRepository.update(update);
     }
 
     /**

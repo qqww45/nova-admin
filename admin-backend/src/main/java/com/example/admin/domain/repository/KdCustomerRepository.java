@@ -3,6 +3,7 @@ package com.example.admin.domain.repository;
 import com.example.admin.domain.model.kd.KdCustomer;
 import com.example.admin.domain.model.kd.KdUpsertResult;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -32,4 +33,13 @@ public interface KdCustomerRepository {
      * @return 数量
      */
     long countByOwner(Long ownerUserId, String acctId);
+
+    /**
+     * 某用户某账套客户行的最近同步时间（绑定列表水位 / 上次同步兜底）。
+     *
+     * @param ownerUserId 数据归属人
+     * @param acctId 账套
+     * @return 最大 {@code sync_at}；无数据返回 null
+     */
+    LocalDateTime maxSyncAt(Long ownerUserId, String acctId);
 }

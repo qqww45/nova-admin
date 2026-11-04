@@ -1,5 +1,6 @@
 package com.example.admin.application.service.impl;
 
+import com.example.admin.domain.model.kd.KdBinding;
 import com.example.admin.domain.model.kd.KdClientIdentity;
 import com.example.admin.domain.model.kd.KdFieldMapping;
 import com.example.admin.domain.model.kd.KdOutboundLine;
@@ -28,6 +29,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -169,6 +171,10 @@ class KdSyncAppServiceImplTest {
         var resp = service.uploadLines(req);
 
         assertEquals(1, resp.getUpserted());
+        ArgumentCaptor<KdBinding> bindingCaptor = ArgumentCaptor.forClass(KdBinding.class);
+        verify(bindingRepository).update(bindingCaptor.capture());
+        assertEquals(9L, bindingCaptor.getValue().getId());
+        assertNotNull(bindingCaptor.getValue().getLastSyncAt(), "行上报成功就必须写下 lastSyncAt");
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<KdOutboundLine>> captor = ArgumentCaptor.forClass((Class) List.class);
         verify(lineRepository).upsertAll(any(), any(), any(), captor.capture());

@@ -3,6 +3,7 @@ package com.example.admin.domain.repository;
 import com.example.admin.domain.model.kd.KdOutbound;
 import com.example.admin.domain.model.kd.KdUpsertResult;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -54,4 +55,22 @@ public interface KdOutboundRepository {
      * @return 数量
      */
     long countByOwner(Long ownerUserId, String acctId);
+
+    /**
+     * 某用户某账套出库单的最近同步时间（绑定列表上次同步兜底）。
+     *
+     * @param ownerUserId 数据归属人
+     * @param acctId 账套
+     * @return 最大 {@code sync_at}；无数据返回 null
+     */
+    LocalDateTime maxSyncAt(Long ownerUserId, String acctId);
+
+    /**
+     * 某用户某账套出库单的最近金蝶修改时间（绑定列表出库水位兜底）。
+     *
+     * @param ownerUserId 数据归属人
+     * @param acctId 账套
+     * @return 最大 {@code kd_modify_time}；无数据返回 null
+     */
+    LocalDateTime maxModifyTime(Long ownerUserId, String acctId);
 }

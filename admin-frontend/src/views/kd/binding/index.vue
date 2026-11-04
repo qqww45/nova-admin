@@ -33,12 +33,12 @@
       </template>
 
       <template #col-watermark="{ row }">
-        <div class="cell-sub">客户：{{ (row as KdBindingResp).watermarkCustomer || '—' }}</div>
-        <div class="cell-sub">出库：{{ (row as KdBindingResp).watermarkOutbound || '—' }}</div>
+        <div class="cell-sub">客户：{{ displayTime((row as KdBindingResp).watermarkCustomer) }}</div>
+        <div class="cell-sub">出库：{{ displayTime((row as KdBindingResp).watermarkOutbound) }}</div>
       </template>
 
       <template #col-syncInfo="{ row }">
-        <div class="cell-sub">{{ (row as KdBindingResp).lastSyncAt || '从未同步' }}</div>
+        <div class="cell-sub">{{ displayTime((row as KdBindingResp).lastSyncAt, '从未同步') }}</div>
         <div class="cell-sub">{{ (row as KdBindingResp).lastSyncResult || '' }}</div>
       </template>
 
@@ -54,13 +54,14 @@
       </template>
 
       <template #columns>
-        <el-table-column label="操作" width="200" align="center" fixed="right">
+        <el-table-column label="操作" width="220" align="center" fixed="right" class-name="binding-ops">
           <template #default="{ row }">
             <TableActionBar
+              compact
               :max="3"
               :actions="[
                 {
-                  label: '立即同步',
+                  label: '同步',
                   hidden: (row as KdBindingResp).status !== 'ACTIVE',
                   onClick: () => syncNow(row as KdBindingResp),
                 },
@@ -318,6 +319,17 @@ function isOnline(lastUsedAt?: string): boolean {
   return Number.isFinite(time) && Date.now() - time <= ONLINE_THRESHOLD_MS;
 }
 
+/**
+ * 展示时间字段：后端统一 {@code yyyy-MM-dd HH:mm:ss}；空值才走占位。
+ *
+ * @param value 接口时间
+ * @param empty 占位文案
+ */
+function displayTime(value?: string, empty = '—'): string {
+  const text = value?.trim();
+  return text ? text : empty;
+}
+
 function onlineLabel(lastUsedAt?: string): string {
   if (!lastUsedAt) return '未上线';
   const time = new Date(lastUsedAt.replace(' ', 'T')).getTime();
@@ -359,6 +371,10 @@ onMounted(load);
 
 .tip {
   margin-bottom: 12px;
+}
+
+:deep(.binding-ops .cell) {
+  overflow: visible;
 }
 
 .code-box {
