@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="app icon">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3E36C0"/>
+      <stop offset="1" stop-color="#00B2B6"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="224" fill="url(#bg)"/>
+  <g fill="#FFFFFF">
+    <circle cx="512" cy="226" r="28"/>
+    <rect x="501" y="222" width="22" height="62" rx="11"/>
+    <rect x="456" y="280" width="112" height="28" rx="14"/>
+    <rect x="260" y="336" width="504" height="28" rx="14"/>
+    <rect x="482" y="352" width="60" height="420" rx="4"/>
+    <rect x="392" y="772" width="240" height="46" rx="23"/>
+    <path d="M174 588 A113 113 0 0 0 390 588 Z"/>
+    <path d="M634 588 A113 113 0 0 0 850 588 Z"/>
+  </g>
+  <g fill="none" stroke="#FFFFFF" stroke-linejoin="round">
+    <path d="M266 350 V398 A18 18 0 0 1 302 398 V350" stroke-width="16" stroke-linecap="round"/>
+    <path d="M722 350 V398 A18 18 0 0 1 758 398 V350" stroke-width="16" stroke-linecap="round"/>
+    <path d="M266 406 L190 610" stroke-width="12" stroke-linecap="butt"/>
+    <path d="M302 406 L374 610" stroke-width="12" stroke-linecap="butt"/>
+    <path d="M722 406 L650 610" stroke-width="12" stroke-linecap="butt"/>
+    <path d="M758 406 L834 610" stroke-width="12" stroke-linecap="butt"/>
+  </g>
+</svg>

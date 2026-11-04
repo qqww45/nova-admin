@@ -8,6 +8,7 @@
   "private": true,
   "scripts": {
     "dev": "electron-vite dev",
+    "test": "node --experimental-strip-types --test src/main/devRenderer.test.mjs",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "pack": "npm run build && electron-builder --dir",
@@ -62,6 +63,7 @@
       }
     ],
     "win": {
+      "icon": "resources/icon.ico",
       "artifactName": "hengzhang-setup-${version}.${ext}",
       "target": [
         "nsis"
@@ -72,7 +74,10 @@
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": false,
-      "shortcutName": "衡账"
+      "shortcutName": "衡账",
+      "installerIcon": "resources/icon.ico",
+      "uninstallerIcon": "resources/icon.ico",
+      "installerHeaderIcon": "resources/icon.ico"
     }
   }
 }

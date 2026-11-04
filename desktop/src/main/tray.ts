@@ -21,6 +21,8 @@ import { runSync } from './sync/runner'
 import { uploadToNova } from './nova/uploader'
 import { getNovaRuntime } from './configStore'
 import { getDb } from './db'
+import { getAppIconPath } from './paths'
+import { existsSync } from 'fs'
 import type { AutoSyncStatus } from '../shared/types'
 
 /** 定时同步间隔（小时）：业务员白天开机，2 小时足够近实时又不动金蝶许可 */
@@ -86,12 +88,19 @@ export async function initTray() {
   }
 
   let image = nativeImage.createEmpty()
-  try {
-    // 从可执行文件提取图标：打包后即衡账应用图标，不引入新资源文件；
-    // 平台不支持（部分 Linux）时留空图标，托盘仍可用（菜单可点）
-    image = await app.getFileIcon(process.execPath, { size: 'small' })
-  } catch {
-    /* ignore */
+  const iconPng = getAppIconPath('icon.png')
+  if (existsSync(iconPng)) {
+    image = nativeImage.createFromPath(iconPng)
+    if (!image.isEmpty() && image.getSize().width > 16) {
+      image = image.resize({ width: 16, height: 16 })
+    }
+  }
+  if (image.isEmpty()) {
+    try {
+      image = await app.getFileIcon(process.execPath, { size: 'small' })
+    } catch {
+      /* 系统不支持取 exe 图标时保持空图，托盘菜单仍可点 */
+    }
   }
 
   try {

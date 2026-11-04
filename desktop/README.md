@@ -10,11 +10,22 @@
 
 ## 开发
 
+必须用 `npm run dev`（electron-vite 会先编译主进程、拉起 Vite，再启动窗口）。不要直接 `electron .` / `npx electron .`，否则会连不上 `http://127.0.0.1:5173`，窗口只剩深色标题栏。
+
 ```bash
 npm install
 npm run rebuild
 npm run dev
 ```
+
+Windows 控制台中文乱码时，先切 UTF-8 再启动：
+
+```bat
+chcp 65001
+npm run dev
+```
+
+控制台里 `Unable to create cache` / `Gpu Cache Creation failed` / `Unable to move the cache ... (0x5)` 是 Chromium GPU 磁盘缓存的权限噪音（常见于中文 Windows），一般可忽略；真正导致空白窗口的是后面的 `Failed to load URL ... ERR_CONNECTION_REFUSED`。
 
 ## M0 探针
 
@@ -61,3 +72,5 @@ npm run dist        # 或 dist:cn（走国内镜像下载 Electron / builder 二
 > 存量 1.2.1 及更早客户端内嵌的是 GitHub 源配置，**无法远程修复**：需手动安装一次新版完整安装包，之后回到自动更新通道。
 
 安装包为 NSIS；数据在 `%LOCALAPPDATA%\衡账\`，更新覆盖程序文件、不动数据。
+
+窗口 / 托盘 / 安装包快捷方式图标在 `resources/icon.svg`（源）、`resources/icon.png`、`resources/icon.ico`（16–256）。改标后在本目录跑 `python3 scripts/make-icon.py` 再打包。

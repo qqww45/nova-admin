@@ -25,3 +25,8 @@ export function getResourcesRoot() {
   }
   return join(app.getAppPath(), 'resources')
 }
+
+/** 窗口 / 托盘用 PNG；安装包用同目录 icon.ico */
+export function getAppIconPath(file: 'icon.png' | 'icon.ico' = 'icon.png') {
+  return join(getResourcesRoot(), file)
+}
