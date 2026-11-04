@@ -402,7 +402,9 @@ async function doUploadToNova(): Promise<NovaUploadResult> {
       skippedCount: skipped,
       // M1 水位语义：客户端完成本次上行的本地时间（服务端只用于展示与单调推进）；
       // 接入金蝶 FModifyDate 后改为真正的金蝶修改时间
-      watermarkTo: watermark,
+      // 本地 sync_at 是 Date.toISOString()（带 Z）。后端 LocalDateTime 默认
+      // 不吃 Instant；1.2.1 原样上报后 finish SUCCESS 被包装成「JSON 不合法」。
+      watermarkTo: watermark ? toLocalTime(watermark) : undefined,
       startedAt,
       finishedAt,
       costMs: Date.now() - startedMs,

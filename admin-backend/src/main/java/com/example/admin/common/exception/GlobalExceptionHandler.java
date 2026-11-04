@@ -7,6 +7,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
@@ -142,7 +143,11 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * 请求体不可解析（JSON 格式错误）。
+     * 请求体不可解析。
+     *
+     * <p>Jackson 把日期格式、截断、类型错误都包成这一种异常。若一律回
+     * 「JSON 是否合法」，采集器批次页上无法区分：1.2.1 把 {@code toISOString()}
+     * 水位写进 finish、网关截断大包、数字溢出。能归类的原因回具体文案，其余仍走兜底。
      *
      * @param e 异常
      * @return 参数错误响应
@@ -150,7 +155,24 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public R<Void> handleNotReadable(HttpMessageNotReadableException e) {
         log.warn("请求体解析失败：{}", e.getMessage());
-        return R.fail(ResultCode.PARAM_ERROR.getCode(), "请求体格式错误，请检查 JSON 是否合法");
+        String detail = describeNotReadable(e);
+        return R.fail(ResultCode.PARAM_ERROR.getCode(),
+                StrUtil.isNotBlank(detail) ? detail : "请求体格式错误，请检查 JSON 是否合法");
+    }
+
+    /**
+     * 唯一键 / 非空等完整性冲突：金蝶上行是读-判-写，1.2.1 四个入口并发时
+     * 后到的 insert 会撞 {@code uk_kd_outbound_line_key}，不应再落成 500。
+     *
+     * @param e       异常
+     * @param request 当前请求
+     * @return 数据已存在（可重试）
+     */
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public R<Void> handleDataIntegrity(DataIntegrityViolationException e, HttpServletRequest request) {
+        log.warn("数据写入冲突 uri={} msg={}", request.getRequestURI(),
+                e.getMostSpecificCause() != null ? e.getMostSpecificCause().getMessage() : e.getMessage());
+        return R.fail(ResultCode.DATA_EXIST.getCode(), "数据写入冲突（可能是并发重复上报），请稍后重试");
     }
 
     /**
@@ -206,5 +228,47 @@ public class GlobalExceptionHandler {
      */
     private String formatFieldError(FieldError fieldError) {
         return fieldError.getField() + ": " + fieldError.getDefaultMessage();
+    }
+
+    /**
+     * 从 Jackson 解析异常链里抽出可给调用方看的原因；无法归类时返回 null。
+     *
+     * @param error 解析异常
+     * @return 具体提示，或 null 走兜底文案
+     */
+    static String describeNotReadable(Throwable error) {
+        String joined = joinMessages(error);
+        if (StrUtil.isBlank(joined)) {
+            return null;
+        }
+        int dateIdx = joined.indexOf("日期时间格式不正确");
+        if (dateIdx >= 0) {
+            String slice = joined.substring(dateIdx);
+            return slice.length() > 200 ? slice.substring(0, 200) : slice;
+        }
+        String lower = joined.toLowerCase();
+        if (lower.contains("unexpected end-of-input")
+                || lower.contains("end-of-input")
+                || joined.contains("Unexpected EOF")) {
+            return "请求体不完整或被截断，请检查网关请求体上限或缩小单次上报行数后重试";
+        }
+        return null;
+    }
+
+    private static String joinMessages(Throwable error) {
+        StringBuilder builder = new StringBuilder();
+        Throwable cursor = error;
+        int depth = 0;
+        while (cursor != null && depth < 8) {
+            if (StrUtil.isNotBlank(cursor.getMessage())) {
+                if (!builder.isEmpty()) {
+                    builder.append(' ');
+                }
+                builder.append(cursor.getMessage());
+            }
+            cursor = cursor.getCause();
+            depth++;
+        }
+        return builder.toString();
     }
 }
