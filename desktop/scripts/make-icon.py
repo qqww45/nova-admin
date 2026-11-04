@@ -1,53 +1,72 @@
 #!/usr/bin/env python3
-"""从品牌标生成 icon.png / icon.ico（青绿圆角方 + 「衡」）。"""
+"""从 resources/icon.svg 生成 icon.png（512）与多尺寸 icon.ico。"""
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
-
 ROOT = Path(__file__).resolve().parents[1] / "resources"
-START = (0x5E, 0xEA, 0xD4)  # --accent-2
-END = (0x2D, 0xD4, 0xBF)  # --accent
-INK = (0x04, 0x2F, 0x2E)
-FONT = Path("/usr/share/fonts/truetype/wqy/wqy-microhei.ttc")
+SVG = ROOT / "icon.svg"
+
+# 与 icon.svg 同步，供无 cairosvg 时的回退绘制
+NAVY = (0x0F, 0x20, 0x3C, 255)
+GOLD = (0xDD, 0xA9, 0x44, 255)
+WHITE = (255, 255, 255, 255)
+RX = 224
+CX = CY = 512
+RING_R = 340
+RING_W = 32
+CHECK = ((337, 520), (453, 627), (693, 381))
+CHECK_W = 80
 
 
-def lerp(a: int, b: int, t: float) -> int:
-    return int(a + (b - a) * t)
+def render_via_cairosvg(size: int):
+    import cairosvg
+    from PIL import Image
+
+    raw = cairosvg.svg2png(url=str(SVG), output_width=size, output_height=size)
+    return Image.open(io.BytesIO(raw)).convert("RGBA")
 
 
-def paint_mark(size: int) -> Image.Image:
+def paint_mark(size: int):
+    """按 SVG 几何用 PIL 回退绘制（圆角方 + 金圈 + 白勾）。"""
+    from PIL import Image, ImageDraw
+
+    s = size / 1024
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    radius = int(size * 14 / 44)
-    for y in range(size):
-        for x in range(size):
-            t = (x + y) / (2 * (size - 1))
-            img.putpixel(
-                (x, y),
-                (lerp(START[0], END[0], t), lerp(START[1], END[1], t), lerp(START[2], END[2], t), 255),
-            )
-    mask = Image.new("L", (size, size), 0)
-    ImageDraw.Draw(mask).rounded_rectangle((0, 0, size - 1, size - 1), radius=radius, fill=255)
-    img.putalpha(mask)
-
     draw = ImageDraw.Draw(img)
-    font = ImageFont.truetype(str(FONT), size=int(size * 0.52), index=0)
-    text = "衡"
-    bbox = draw.textbbox((0, 0), text, font=font)
-    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    x = (size - tw) / 2 - bbox[0]
-    y = (size - th) / 2 - bbox[1] + size * 0.02
-    # 微米黑没有 800 字重，描边加一层让小尺寸仍清楚
-    stroke = max(1, size // 48)
-    draw.text((x, y), text, font=font, fill=INK, stroke_width=stroke, stroke_fill=INK)
+    draw.rounded_rectangle((0, 0, size - 1, size - 1), radius=max(1, RX * s), fill=NAVY)
+
+    cx, cy, r = CX * s, CY * s, RING_R * s
+    ring_w = max(1, round(RING_W * s))
+    draw.ellipse((cx - r, cy - r, cx + r, cy + r), outline=GOLD, width=ring_w)
+
+    pts = [(x * s, y * s) for x, y in CHECK]
+    chk_w = max(1, round(CHECK_W * s))
+    draw.line(pts, fill=WHITE, width=chk_w, joint="curve")
+    rad = chk_w / 2
+    for x, y in pts:
+        draw.ellipse((x - rad, y - rad, x + rad, y + rad), fill=WHITE)
     return img
 
 
+def render_master(size: int = 1024):
+    try:
+        return render_via_cairosvg(size)
+    except Exception as exc:
+        print(f"cairosvg 不可用，改用 PIL 回退：{exc}")
+        return paint_mark(size)
+
+
 def main() -> None:
+    from PIL import Image
+
     ROOT.mkdir(parents=True, exist_ok=True)
-    master = paint_mark(1024).filter(ImageFilter.UnsharpMask(radius=1.2, percent=80, threshold=2))
+    if not SVG.is_file():
+        raise SystemExit(f"缺少 {SVG}")
+
+    master = render_master(1024)
     png = ROOT / "icon.png"
     master.resize((512, 512), Image.Resampling.LANCZOS).save(png, "PNG")
     sizes = [(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]

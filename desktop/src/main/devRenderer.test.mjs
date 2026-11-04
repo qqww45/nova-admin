@@ -61,8 +61,16 @@ test('buildStartupErrorHtml 给出可操作的中文说明并转义 URL', () => 
 
 test('品牌图标 PNG/SVG/ICO 齐全，ico 含 256（安装包/快捷方式）', () => {
   const dir = resolve(import.meta.dirname, '../../resources')
-  assert.equal(existsSync(resolve(dir, 'icon.svg')), true)
+  const svgPath = resolve(dir, 'icon.svg')
+  assert.equal(existsSync(svgPath), true)
   assert.equal(existsSync(resolve(dir, 'icon.png')), true)
+  const svg = readFileSync(svgPath, 'utf8')
+  assert.match(svg, /<svg\b/)
+  assert.match(svg, /<path\b/)
+  assert.doesNotMatch(svg, /<image\b/i)
+  assert.doesNotMatch(svg, /<text\b/i)
+  assert.doesNotMatch(svg, /xlink:href|data:image/)
+  assert.doesNotMatch(svg, /衡/)
   const icoPath = resolve(dir, 'icon.ico')
   assert.equal(existsSync(icoPath), true)
   const ico = readFileSync(icoPath)
