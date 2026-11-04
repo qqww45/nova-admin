@@ -3,6 +3,7 @@ import { clearNovaBinding, getNovaRuntime } from '../configStore'
 import { runSync } from '../sync/runner'
 import { checkForUpdatesSilent } from '../updater'
 import { ackCommand, fetchCommand, type NovaCommand } from './client'
+import { markHeartbeatFail, markHeartbeatOk, setHeartbeatActive } from './health'
 import { clearTaskCache, refreshTasks } from './tasks'
 import { uploadToNova } from './uploader'
 
@@ -24,6 +25,7 @@ let busy = false
 /** 启动（重复调用幂等） */
 export function startCommandLoop(): void {
   if (timer) return
+  setHeartbeatActive(true)
   void tick()
   timer = setInterval(() => void tick(), POLL_MS)
 }
@@ -32,6 +34,7 @@ export function startCommandLoop(): void {
 export function stopCommandLoop(): void {
   if (timer) clearInterval(timer)
   timer = undefined
+  setHeartbeatActive(false)
 }
 
 /** 一次轮询 */
@@ -43,10 +46,13 @@ async function tick(): Promise<void> {
   busy = true
   try {
     const command = await fetchCommand(rt.baseUrl, rt.token)
+    // 请求本身即心跳：成功 / 失败都记录，同步页的「服务状态」据此展示
+    markHeartbeatOk()
     if (!command) return
     await handle(rt.baseUrl, rt.token, command)
-  } catch {
+  } catch (e) {
     // 网络抖动 / 服务端重启：静默重试
+    markHeartbeatFail(e instanceof Error ? e.message : String(e))
   } finally {
     busy = false
   }
@@ -71,7 +77,10 @@ async function handle(baseUrl: string, token: string, command: NovaCommand): Pro
         // 普通「立即同步」走自动模式：有水位增量、无水位全量，
         // 不再每次点一下就把整个账套重拉一遍
         const full = (command.payload || '').trim().toLowerCase() === 'full'
-        const results = await runSync({ sinceDate: full ? '' : undefined })
+        const results = await runSync({
+          sinceDate: full ? '' : undefined,
+          trigger: 'command'
+        })
         const upload = await uploadToNova()
         message = `${results.map((r) => r.message).join('；')}；上行：${upload.message}`
         break

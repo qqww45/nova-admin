@@ -173,6 +173,9 @@ export interface SyncProgress {
   finishedAt?: string
 }
 
+/** 同步触发来源：页面手动 / 托盘定时 / 平台远程指令 */
+export type SyncTrigger = 'manual' | 'auto' | 'command'
+
 export interface SyncStartInput {
   /**
    * 显式重拉起点（yyyy-MM-dd）。空 = 自动模式：
@@ -180,6 +183,8 @@ export interface SyncStartInput {
    * 无水位 → 全量（首次同步）。
    */
   sinceDate?: string
+  /** 由主进程入口填写（手动 / 托盘 / 指令），渲染进程无需传 */
+  trigger?: SyncTrigger
 }
 
 export interface LastSyncStat {
@@ -188,6 +193,19 @@ export interface LastSyncStat {
   rowCount: number
   message: string
   finishedAt?: string | null
+}
+
+/** sync_run 表的一条历史记录（同步历史展示用） */
+export interface SyncRunRecord {
+  id: number
+  entity: string
+  status: SyncRunStatus
+  rowCount: number
+  message: string
+  startedAt: string | null
+  finishedAt: string | null
+  /** 触发来源；老数据为 null */
+  source: SyncTrigger | null
 }
 
 export interface CustomerOption {
@@ -311,4 +329,62 @@ export interface NovaUploadResult {
   upserted?: number
   skipped?: number
   finishedAt?: string
+}
+
+/** nova_upload_run 表的一条历史记录（上行历史展示用） */
+export interface NovaUploadRecord {
+  id: number
+  batchId: string | null
+  status: 'success' | 'failed' | 'noop'
+  message: string
+  received: number
+  upserted: number
+  skipped: number
+  startedAt: string | null
+  finishedAt: string | null
+}
+
+/* ---------------- 对账平台健康状态 ---------------- */
+
+/** 主动探测结果（点击「立即检测」时产生） */
+export interface NovaProbeResult {
+  ok: boolean
+  /** unbound = 未绑定；ok = 服务正常；error = 请求失败 */
+  status: 'ok' | 'error' | 'unbound'
+  message: string
+  latencyMs?: number
+  checkedAt: string
+}
+
+/** 指令轮询（心跳）状态 */
+export interface NovaHeartbeat {
+  /** 轮询是否在跑（绑定后启动，解绑 / 退出时停止） */
+  active: boolean
+  pollIntervalSec: number
+  /** 上次轮询成功时间 */
+  lastOkAt?: string
+  /** 上次轮询失败时间 */
+  lastFailAt?: string
+  lastFailMessage?: string
+}
+
+/** 托盘定时同步状态 */
+export interface AutoSyncStatus {
+  enabled: boolean
+  intervalHours: number
+  /** 上次自动同步时间（没有则查 sync_run 里最近一次 auto 记录） */
+  lastRunAt?: string
+  lastRunOk?: boolean
+  lastRunMessage?: string
+  /** 下次预计执行时间（进程内存值，重启后按启动时间估算） */
+  nextRunAt?: string
+}
+
+/** 对账平台综合健康状态（nova:health 返回） */
+export interface NovaHealth {
+  state: NovaState
+  heartbeat: NovaHeartbeat
+  /** 最近一次主动探测结果；未探测过则无 */
+  lastProbe?: NovaProbeResult
+  autoSync: AutoSyncStatus
 }

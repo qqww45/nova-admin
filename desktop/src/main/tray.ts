@@ -7,17 +7,21 @@
  * <p>行为：
  * <ul>
  *     <li>点窗口关闭按钮 = 隐藏到托盘（退出只能走托盘菜单，防止误关）；</li>
- *     <li>托盘菜单：显示主窗口 / 立即同步 / 开机自启开关 / 退出；</li>
+ *     <li>托盘菜单：显示主窗口 / 立即同步并上报 / 开机自启开关（仅打包后）/ 退出；</li>
+ *     <li>单击托盘图标 = 显示主窗口，右键 = 菜单；</li>
  *     <li>每 AUTO_SYNC_HOURS 小时自动同步 + 上行（有绑定才执行；同步冲突自动让位）；</li>
- *     <li>开机自启默认开启（业务员电脑重启后采集器自动拉起）。</li>
+ *     <li>开机自启默认开启（业务员电脑重启后采集器自动拉起），仅打包后设置。</li>
  * </ul>
  *
- * <p>仅打包后生效；开发模式保持"关窗即退"，不干扰开发。
+ * <p>开发模式同样启用（便于验证托盘行为）；系统不支持托盘（部分 Linux）时
+ * 创建失败，退回"关窗即退"，绝不把窗口藏进找不到的地方。
  */
 import { app, BrowserWindow, Menu, Tray, nativeImage } from 'electron'
 import { runSync } from './sync/runner'
 import { uploadToNova } from './nova/uploader'
 import { getNovaRuntime } from './configStore'
+import { getDb } from './db'
+import type { AutoSyncStatus } from '../shared/types'
 
 /** 定时同步间隔（小时）：业务员白天开机，2 小时足够近实时又不动金蝶许可 */
 export const AUTO_SYNC_HOURS = 2
@@ -27,39 +31,45 @@ let autoTimer: ReturnType<typeof setInterval> | undefined
 let autoSyncEnabled = true
 let quitting = false
 
+/** 定时同步运行轨迹（进程内存；重启后 lastRun 从 sync_run 里找回来） */
+let lastAutoRunAt: string | undefined
+let lastAutoRunOk: boolean | undefined
+let lastAutoRunMessage: string | undefined
+let nextAutoRunAt: string | undefined
+
 /** 退出流程中不再拦截窗口关闭（托盘菜单退出 / 安装更新时置 true） */
 export function markQuitting() {
   quitting = true
 }
 
+/** 显示并聚焦主窗口（托盘菜单 / 单击图标共用） */
+function showMainWindow() {
+  const win = BrowserWindow.getAllWindows()[0]
+  if (!win) return
+  if (win.isMinimized()) win.restore()
+  win.show()
+  win.focus()
+}
+
 /**
  * 初始化托盘与窗口关闭行为。
  *
- * @param getWindow 取主窗口（可能未创建）
+ * <p>先挂关窗拦截，再等图标（避免启动瞬间关窗直接退出）；托盘创建失败则卸掉拦截，
+ * 退回"关窗即退"，绝不把窗口藏进找不到的地方。
  */
-export async function initTray(getWindow: () => BrowserWindow | null) {
-  if (!app.isPackaged) {
-    // 开发模式：关窗即退，托盘与定时都不启用
-    return
-  }
-
-  let image = nativeImage.createEmpty()
-  try {
-    // 从可执行文件提取图标：打包后即衡账应用图标，不引入新资源文件；
-    // 平台不支持（部分 Linux）时留空图标，托盘仍可用（菜单可点）
-    image = await app.getFileIcon(process.execPath, { size: 'small' })
-  } catch {
-    /* ignore */
-  }
-  tray = new Tray(image.isEmpty() ? nativeImage.createEmpty() : image)
-  rebuildTrayMenu()
+export async function initTray() {
+  if (tray) return
 
   // 关窗 = 隐藏到托盘；首次隐藏提示一次，防止用户以为程序退出（后台还在同步）
   let hinted = false
+  const attached: BrowserWindow[] = []
+  const onCreated = (_e: Electron.Event, win: BrowserWindow) => attachHideOnClose(win)
   BrowserWindow.getAllWindows().forEach((win) => attachHideOnClose(win))
-  app.on('browser-window-created', (_e, win) => attachHideOnClose(win))
+  app.on('browser-window-created', onCreated)
 
   function attachHideOnClose(win: BrowserWindow) {
+    if (attached.includes(win)) return
+    attached.push(win)
     win.on('close', (e) => {
       if (quitting) return
       e.preventDefault()
@@ -75,6 +85,28 @@ export async function initTray(getWindow: () => BrowserWindow | null) {
     })
   }
 
+  let image = nativeImage.createEmpty()
+  try {
+    // 从可执行文件提取图标：打包后即衡账应用图标，不引入新资源文件；
+    // 平台不支持（部分 Linux）时留空图标，托盘仍可用（菜单可点）
+    image = await app.getFileIcon(process.execPath, { size: 'small' })
+  } catch {
+    /* ignore */
+  }
+
+  try {
+    tray = new Tray(image.isEmpty() ? nativeImage.createEmpty() : image)
+  } catch {
+    // 系统没有托盘支持：卸掉关窗拦截，保持默认"关窗即退"
+    app.off('browser-window-created', onCreated)
+    attached.forEach((win) => win.removeAllListeners('close'))
+    tray = null
+    return
+  }
+
+  rebuildTrayMenu()
+  // 单击托盘图标 = 显示主窗口（右键才是菜单），符合 Windows 习惯
+  tray.on('click', () => showMainWindow())
   startAutoSyncTimer()
 }
 
@@ -82,34 +114,35 @@ export async function initTray(getWindow: () => BrowserWindow | null) {
 function rebuildTrayMenu() {
   if (!tray) return
   tray.setToolTip('衡账 · 金蝶采集器')
-  tray.setContextMenu(
-    Menu.buildFromTemplate([
-      { label: '显示主窗口', click: () => BrowserWindow.getAllWindows()[0]?.show() },
-      { type: 'separator' },
-      { label: '立即同步并上报', click: () => void autoSync('手动') },
-      {
-        label: `开机自启（当前：${app.getLoginItemSettings().openAtLogin ? '开' : '关'}）`,
-        click: () => {
-          const next = !app.getLoginItemSettings().openAtLogin
-          app.setLoginItemSettings({ openAtLogin: next })
-          rebuildTrayMenu()
-        }
-      },
-      { type: 'separator' },
-      {
-        label: '退出',
-        click: () => {
-          markQuitting()
-          app.quit()
-        }
+  const menu: Array<Electron.MenuItemConstructorOptions> = [
+    { label: '显示主窗口', click: () => showMainWindow() },
+    { type: 'separator' },
+    { label: '立即同步并上报', click: () => void autoSync('手动') }
+  ]
+  if (app.isPackaged) {
+    menu.push({
+      label: `开机自启（当前：${app.getLoginItemSettings().openAtLogin ? '开' : '关'}）`,
+      click: () => {
+        const next = !app.getLoginItemSettings().openAtLogin
+        app.setLoginItemSettings({ openAtLogin: next })
+        rebuildTrayMenu()
       }
-    ])
-  )
+    })
+  }
+  menu.push({ type: 'separator' }, {
+    label: '退出',
+    click: () => {
+      markQuitting()
+      app.quit()
+    }
+  })
+  tray.setContextMenu(Menu.buildFromTemplate(menu))
 }
 
 /** 启动定时同步 */
 function startAutoSyncTimer() {
   if (autoTimer) return
+  nextAutoRunAt = new Date(Date.now() + AUTO_SYNC_HOURS * 3_600_000).toISOString()
   autoTimer = setInterval(() => void autoSync('定时'), AUTO_SYNC_HOURS * 3_600_000)
 }
 
@@ -124,22 +157,75 @@ async function autoSync(trigger: '手动' | '定时') {
     if (tray) tray.setToolTip('衡账 · 未绑定对账平台')
     return
   }
+  // 「上次 / 下次自动同步」只跟定时周期走；托盘菜单点的不算
+  if (trigger === '定时') {
+    lastAutoRunAt = new Date().toISOString()
+    nextAutoRunAt = new Date(Date.now() + AUTO_SYNC_HOURS * 3_600_000).toISOString()
+  }
   try {
     // 业务锁在同步进行中会直接抛错（"已有同步或其它任务进行中"）——让位即可
-    const results = await runSync({})
+    const results = await runSync({ trigger: trigger === '定时' ? 'auto' : 'manual' })
     const upload = await uploadToNova()
+    if (trigger === '定时') {
+      lastAutoRunAt = results[results.length - 1]?.finishedAt || lastAutoRunAt
+      lastAutoRunOk = results.every((r) => r.status === 'success')
+      lastAutoRunMessage = `${results.map((r) => r.message).join('；')}；上行：${upload.message}`
+    }
     tray?.displayBalloon?.({
       iconType: 'info',
       title: `同步完成（${trigger}）`,
       content: `${results.map((r) => r.message).join('；')}；上行：${upload.message}`
     })
+    if (trigger === '定时' && lastAutoRunAt) {
+      tray?.setToolTip(`衡账 · 上次同步 ${formatClock(lastAutoRunAt)}`)
+    }
   } catch (e) {
     // 同步失败不打扰业务员（托盘 tooltip 留痕），下个周期自动重试
+    if (trigger === '定时') {
+      lastAutoRunOk = false
+      lastAutoRunMessage = e instanceof Error ? e.message : String(e)
+    }
     tray?.displayBalloon?.({
       iconType: 'warning',
       title: `同步未完成（${trigger}）`,
       content: e instanceof Error ? e.message : String(e)
     })
+    tray?.setToolTip(`衡账 · 上次同步失败 ${formatClock(new Date().toISOString())}`)
+  }
+}
+
+/** 托盘定时同步状态（同步页「定时同步」卡片展示用） */
+export function getAutoSyncStatus(): AutoSyncStatus {
+  let lastRunAt = lastAutoRunAt
+  let lastRunOk = lastAutoRunOk
+  let lastRunMessage = lastAutoRunMessage
+
+  if (!lastRunAt) {
+    // 重启后内存清零：从 sync_run 找最近一次定时同步
+    try {
+      const row = getDb()
+        .prepare(
+          `SELECT started_at AS startedAt, status, message FROM sync_run
+           WHERE source = 'auto' ORDER BY id DESC LIMIT 1`
+        )
+        .get() as { startedAt: string; status: string; message: string } | undefined
+      if (row) {
+        lastRunAt = row.startedAt
+        lastRunOk = row.status === 'success'
+        lastRunMessage = row.message
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return {
+    enabled: autoSyncEnabled,
+    intervalHours: AUTO_SYNC_HOURS,
+    lastRunAt,
+    lastRunOk,
+    lastRunMessage,
+    nextRunAt: nextAutoRunAt
   }
 }
 
@@ -152,4 +238,12 @@ export function stopAutoSync() {
 /** 是否启用定时同步（预留：后续可加设置项） */
 export function isAutoSyncEnabled(): boolean {
   return autoSyncEnabled
+}
+
+/** ISO 时间 → HH:mm（托盘 tooltip 用） */
+function formatClock(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${p(d.getHours())}:${p(d.getMinutes())}`
 }

@@ -7,17 +7,21 @@ import type {
   ConnectionTestResult,
   CustomerOption,
   MappingApplyInput,
+  NovaHealth,
   NovaMappingUploadInput,
+  NovaProbeResult,
   MappingState,
   NovaBindInput,
   NovaBindResult,
   NovaState,
+  NovaUploadRecord,
   NovaUploadResult,
   ProbeReport,
   LastSyncStat,
   StatementDTO,
   StatementPreviewQuery,
   SyncProgress,
+  SyncRunRecord,
   SyncStartInput,
   UpdateStatus
 } from '../shared/types'
@@ -36,6 +40,7 @@ const api = {
   resetMapping: (): Promise<MappingState> => ipcRenderer.invoke('mapping:reset'),
   runSync: (input: SyncStartInput): Promise<SyncProgress[]> => ipcRenderer.invoke('sync:run', input),
   lastSyncStats: (): Promise<LastSyncStat[]> => ipcRenderer.invoke('sync:lastStats'),
+  syncHistory: (): Promise<SyncRunRecord[]> => ipcRenderer.invoke('sync:history'),
   onSyncProgress: (cb: (p: SyncProgress) => void) => {
     const listener = (_: Electron.IpcRendererEvent, p: SyncProgress) => cb(p)
     ipcRenderer.on('sync:progress', listener)
@@ -43,6 +48,9 @@ const api = {
   },
   listCustomers: (): Promise<CustomerOption[]> => ipcRenderer.invoke('customers:list'),
   getNovaState: (): Promise<NovaState> => ipcRenderer.invoke('nova:state'),
+  getNovaHealth: (): Promise<NovaHealth> => ipcRenderer.invoke('nova:health'),
+  probeNovaHealth: (): Promise<NovaProbeResult> => ipcRenderer.invoke('nova:probe'),
+  novaUploadHistory: (): Promise<NovaUploadRecord[]> => ipcRenderer.invoke('nova:history'),
   bindNova: (input: NovaBindInput): Promise<NovaBindResult> => ipcRenderer.invoke('nova:bind', input),
   unbindNova: (): Promise<NovaState> => ipcRenderer.invoke('nova:unbind'),
   uploadToNova: (): Promise<NovaUploadResult> => ipcRenderer.invoke('nova:upload'),

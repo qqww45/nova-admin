@@ -1,15 +1,16 @@
-import { BrowserWindow, ipcMain, shell } from 'electron'
+import { ipcMain, shell } from 'electron'
 import { getPublicConfig, saveConfig } from './configStore'
-import { bindNova, novaState, unbindNova, uploadToNova } from './nova/uploader'
+import { bindNova, novaState, novaUploadHistory, unbindNova, uploadToNova } from './nova/uploader'
 import { uploadMapping } from './nova/client'
 import { getNovaRuntime } from './configStore'
 import { clearTaskCache, refreshTasks } from './nova/tasks'
 import { startCommandLoop, stopCommandLoop } from './nova/commands'
+import { getNovaHealth, probeNova } from './nova/health'
 import { getKingdee } from './kingdee/client'
 import { detectKingdeeEnv } from './kingdee/envDetect'
 import { runM0Probe } from './kingdee/probe'
 import { getDb } from './db'
-import { runSync, listCustomers, lastSyncStats } from './sync/runner'
+import { runSync, listCustomers, lastSyncStats, syncHistory } from './sync/runner'
 import { buildStatement } from './domain/statement'
 import { exportStatementXlsx } from './export/excel'
 import {
@@ -90,16 +91,21 @@ export function registerIpc() {
   })
 
   ipcMain.handle('sync:run', async (_e, input: SyncStartInput) => {
-    const results = await runSync(input)
+    const results = await runSync({ ...input, trigger: input.trigger || 'manual' })
     // 本地同步成功后再上行；不 await，避免业务员拿对账单前先等一遍网络
-    void autoUpload()
+    // （上行结果由 uploader 统一广播 nova:upload，四个入口共用一条路径）
+    void uploadToNova()
     return results
   })
   ipcMain.handle('sync:lastStats', () => lastSyncStats())
+  ipcMain.handle('sync:history', () => syncHistory(200))
   ipcMain.handle('customers:list', () => listCustomers())
 
   // 上行同步（nova 对账平台）：渲染进程拿不到令牌原文，只能看状态
   ipcMain.handle('nova:state', () => novaState())
+  ipcMain.handle('nova:history', () => novaUploadHistory(200))
+  ipcMain.handle('nova:health', () => getNovaHealth())
+  ipcMain.handle('nova:probe', () => probeNova())
   ipcMain.handle('nova:bind', async (_e, input: NovaBindInput) => {
     const result = await bindNova(input)
     if (result.ok) {
@@ -115,9 +121,8 @@ export function registerIpc() {
     return unbindNova()
   })
   ipcMain.handle('nova:upload', async (): Promise<NovaUploadResult> => {
-    const result = await uploadToNova()
-    broadcastNova(result)
-    return result
+    // 结果由 uploader 统一广播（覆盖手动 / 托盘 / 指令 / 同步后自动四个入口）
+    return uploadToNova()
   })
 
   // 字段自检结果回传：把自检拼出的字段集写到本绑定的服务端字段映射，
@@ -160,24 +165,4 @@ export function registerIpc() {
   ipcMain.handle('updater:install', () => {
     quitAndInstall()
   })
-}
-
-/** 上行结果广播到所有窗口（同步页据此刷新状态） */
-function broadcastNova(result: NovaUploadResult) {
-  for (const win of BrowserWindow.getAllWindows()) {
-    win.webContents.send('nova:upload', result)
-  }
-}
-
-/** 同步结束后自动上行：失败只记录，不打扰业务员 */
-async function autoUpload() {
-  try {
-    broadcastNova(await uploadToNova())
-  } catch (e) {
-    broadcastNova({
-      ok: false,
-      status: 'failed',
-      message: e instanceof Error ? e.message : String(e)
-    })
-  }
 }

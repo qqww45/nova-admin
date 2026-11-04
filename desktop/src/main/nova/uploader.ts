@@ -1,4 +1,4 @@
-import { app } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import { hostname } from 'os'
 import { randomUUID } from 'crypto'
 import { getDb } from '../db'
@@ -24,6 +24,7 @@ import type {
   NovaBindInput,
   NovaBindResult,
   NovaState,
+  NovaUploadRecord,
   NovaUploadResult
 } from '../../shared/types'
 
@@ -98,6 +99,83 @@ export function novaState(): NovaState {
   } catch {
     return getNovaState()
   }
+}
+
+/** 上行结果广播到所有窗口：上行有四个入口（手动 / 同步后自动 / 托盘 / 指令），统一在这里广播 */
+function broadcastNova(result: NovaUploadResult) {
+  for (const win of BrowserWindow.getAllWindows()) {
+    win.webContents.send('nova:upload', result)
+  }
+}
+
+/** 一次上行落到 nova_upload_run（历史展示用；noop 也记，证明"定时同步确实在跑"） */
+function recordUploadRun(row: {
+  batchId?: string
+  status: 'success' | 'failed' | 'noop'
+  message: string
+  received: number
+  upserted: number
+  skipped: number
+  startedAt: string
+  finishedAt: string
+}) {
+  try {
+    getDb()
+      .prepare(
+        `INSERT INTO nova_upload_run(batch_id, status, message, received, upserted, skipped, started_at, finished_at)
+         VALUES(?,?,?,?,?,?,?,?)`
+      )
+      .run(
+        row.batchId ?? null,
+        row.status,
+        row.message.slice(0, 500),
+        row.received,
+        row.upserted,
+        row.skipped,
+        row.startedAt,
+        row.finishedAt
+      )
+  } catch {
+    /* 历史落库失败不影响主流程 */
+  }
+}
+
+/** 上行历史（新到旧） */
+export function novaUploadHistory(limit = 100): NovaUploadRecord[] {
+  const rows = getDb()
+    .prepare(
+      `
+      SELECT id, batch_id AS batchId, status, message,
+             received, upserted, skipped,
+             started_at AS startedAt, finished_at AS finishedAt
+      FROM nova_upload_run
+      ORDER BY id DESC
+      LIMIT ?
+    `
+    )
+    .all(Math.max(1, Math.min(500, limit))) as Array<{
+    id: number
+    batchId: string | null
+    status: string
+    message: string
+    received: number
+    upserted: number
+    skipped: number
+    startedAt: string | null
+    finishedAt: string | null
+  }>
+
+  return rows.map((r) => ({
+    id: r.id,
+    batchId: r.batchId,
+    status: r.status as NovaUploadRecord['status'],
+    message: String(r.message || ''),
+    received: Number(r.received) || 0,
+    upserted: Number(r.upserted) || 0,
+    skipped: Number(r.skipped) || 0,
+    startedAt: r.startedAt,
+    finishedAt: r.finishedAt
+  }))
 }
 
 /** 绑定：用 nova 页面生成的 8 位绑定码换取机器令牌 */
@@ -177,7 +255,9 @@ export function uploadToNova(): Promise<NovaUploadResult> {
 async function doUploadToNova(): Promise<NovaUploadResult> {
   const rt = getNovaRuntime()
   if (!rt.token || !rt.bindingId) {
-    return { ok: false, status: 'unbound', message: '尚未绑定对账平台' }
+    const result = { ok: false as const, status: 'unbound' as const, message: '尚未绑定对账平台' }
+    broadcastNova(result)
+    return result
   }
   const db = getDb()
   const since = rt.uploadWatermark || ''
@@ -206,7 +286,20 @@ async function doUploadToNova(): Promise<NovaUploadResult> {
     .all(since) as LineRow[]
 
   if (!customers.length && !outbounds.length && !lines.length) {
-    return { ok: true, status: 'noop', message: '没有需要上报的新数据' }
+    const finishedAt = formatLocalTime()
+    const message = '没有需要上报的新数据'
+    recordUploadRun({
+      status: 'noop',
+      message,
+      received: 0,
+      upserted: 0,
+      skipped: 0,
+      startedAt,
+      finishedAt
+    })
+    const result = { ok: true as const, status: 'noop' as const, message, finishedAt }
+    broadcastNova(result)
+    return result
   }
 
   // 水位只取"本次真正读到的最大 sync_at"，保证不跳过任何一行
@@ -318,7 +411,17 @@ async function doUploadToNova(): Promise<NovaUploadResult> {
 
     const message = `已上报 客户 ${customers.length} / 出库 ${outbounds.length} / 分录 ${lines.length}`
     saveNovaUploadResult({ ok: true, message, watermark, finishedAt })
-    return {
+    recordUploadRun({
+      batchId,
+      status: 'success',
+      message,
+      received,
+      upserted,
+      skipped,
+      startedAt,
+      finishedAt
+    })
+    const result: NovaUploadResult = {
       ok: true,
       status: 'success',
       message,
@@ -327,6 +430,8 @@ async function doUploadToNova(): Promise<NovaUploadResult> {
       skipped,
       finishedAt
     }
+    broadcastNova(result)
+    return result
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
     // 失败也要回报批次，服务端才能看到失败现场；回报本身失败不影响主流程
@@ -346,7 +451,27 @@ async function doUploadToNova(): Promise<NovaUploadResult> {
     }
     const finishedAt = formatLocalTime()
     saveNovaUploadResult({ ok: false, message, finishedAt })
-    return { ok: false, status: 'failed', message, received, upserted, skipped, finishedAt }
+    recordUploadRun({
+      batchId,
+      status: 'failed',
+      message,
+      received,
+      upserted,
+      skipped,
+      startedAt,
+      finishedAt
+    })
+    const result: NovaUploadResult = {
+      ok: false,
+      status: 'failed',
+      message,
+      received,
+      upserted,
+      skipped,
+      finishedAt
+    }
+    broadcastNova(result)
+    return result
   }
 }
 
