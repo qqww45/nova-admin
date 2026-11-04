@@ -116,6 +116,36 @@ public class KdOutboundRepositoryImpl implements KdOutboundRepository {
                 .eq(KdOutboundPo::getInvalid, 0));
     }
 
+    @Override
+    public LocalDateTime maxSyncAt(Long ownerUserId, String acctId) {
+        if (ownerUserId == null || acctId == null || acctId.isBlank()) {
+            return null;
+        }
+        KdOutboundPo po = outboundMapper.selectOne(new LambdaQueryWrapper<KdOutboundPo>()
+                .select(KdOutboundPo::getSyncAt)
+                .eq(KdOutboundPo::getOwnerUserId, ownerUserId)
+                .eq(KdOutboundPo::getAcctId, acctId)
+                .isNotNull(KdOutboundPo::getSyncAt)
+                .orderByDesc(KdOutboundPo::getSyncAt)
+                .last("LIMIT 1"));
+        return po == null ? null : po.getSyncAt();
+    }
+
+    @Override
+    public LocalDateTime maxModifyTime(Long ownerUserId, String acctId) {
+        if (ownerUserId == null || acctId == null || acctId.isBlank()) {
+            return null;
+        }
+        KdOutboundPo po = outboundMapper.selectOne(new LambdaQueryWrapper<KdOutboundPo>()
+                .select(KdOutboundPo::getKdModifyTime)
+                .eq(KdOutboundPo::getOwnerUserId, ownerUserId)
+                .eq(KdOutboundPo::getAcctId, acctId)
+                .isNotNull(KdOutboundPo::getKdModifyTime)
+                .orderByDesc(KdOutboundPo::getKdModifyTime)
+                .last("LIMIT 1"));
+        return po == null ? null : po.getKdModifyTime();
+    }
+
     /**
      * 批量查已存在的主键。
      *

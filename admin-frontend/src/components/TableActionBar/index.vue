@@ -48,10 +48,16 @@ const props = withDefaults(
     max?: number;
     /** 按钮尺寸，全站统一 small */
     size?: 'large' | 'default' | 'small';
+    /**
+     * 紧凑模式：缩短按钮最小宽度，给「同步 / 指令 / 轮换 / 更多」这类
+     * 四项操作列用，避免 64px × 4 撑破固定列被裁切。
+     */
+    compact?: boolean;
   }>(),
   {
     max: 3,
     size: 'small',
+    compact: false,
   },
 );
 
@@ -81,7 +87,7 @@ function onCommand(action: TableActionItem): void {
 </script>
 
 <template>
-  <div class="table-action-bar">
+  <div class="table-action-bar" :class="{ 'table-action-bar--compact': compact }">
     <el-button
       v-for="action in inlineActions"
       :key="action.label"
@@ -135,6 +141,16 @@ function onCommand(action: TableActionItem): void {
     margin: 0;
     justify-content: center;
     transition: opacity var(--admin-transition-fast) ease;
+  }
+
+  &--compact {
+    flex-wrap: nowrap;
+    gap: 2px;
+
+    .table-action-bar__btn {
+      min-width: 40px;
+      padding: 0 2px;
+    }
   }
 
   /* 下拉项中的危险操作，与行内 danger 按钮语义保持一致 */
