@@ -11,8 +11,11 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import java.io.IOException;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.TimeZone;
@@ -34,8 +37,13 @@ import java.util.TimeZone;
  * 原因是业务侧的"下单时间/出货日期/对账日期"在界面上就是日期控件（el-date-picker），
  * 天然只产出 {@code yyyy-MM-dd}；若严格要求 {@code yyyy-MM-dd HH:mm:ss}，
  * 前端要么在每个日期字段上补 {@code 00:00:00}，要么一次保存失败 —— 两种都是把格式负担转嫁给调用方。
- * 这里按"完整格式 → ISO → 仅日期"依次尝试，缺失的时间部分补零点，
+ * 这里按"完整格式 → ISO 本地 → ISO Instant/Offset（含 {@code Z}）→ 仅日期"
+ * 依次尝试；Instant/Offset 按 GMT+8 转成 {@code LocalDateTime}，缺失的时间部分补零点。
  * 序列化格式不变（仍为 {@code yyyy-MM-dd HH:mm:ss}），对既有接口无影响。
+ *
+ * <p>采集器 1.2.1 把本地 {@code sync_at}（{@code Date.toISOString()}，带 {@code Z}）
+ * 原样写入批次 finish 的 {@code watermarkTo}。只认本地格式时，整批数据已经落库
+ * 也会被包装成「请求体格式错误，请检查 JSON 是否合法」。
  *
  * @author admin-system
  * @since 2026-01-01
@@ -77,6 +85,8 @@ public class JacksonConfig {
      */
     static final class LenientLocalDateTimeDeserializer extends JsonDeserializer<LocalDateTime> {
 
+        private static final ZoneId APP_ZONE = ZoneId.of("GMT+8");
+
         @Override
         public LocalDateTime deserialize(JsonParser parser, DeserializationContext context) throws IOException {
             String text = parser.getValueAsString();
@@ -90,13 +100,25 @@ public class JacksonConfig {
             } catch (DateTimeParseException ignored) {
                 // 继续尝试下一种格式
             }
-            // 2) ISO：yyyy-MM-ddTHH:mm:ss（第三方系统对接常见）
+            // 2) ISO 本地：yyyy-MM-ddTHH:mm:ss[.SSS]（无偏移）
             try {
                 return LocalDateTime.parse(value);
             } catch (DateTimeParseException ignored) {
                 // 继续尝试下一种格式
             }
-            // 3) 仅日期：yyyy-MM-dd，时间补零点
+            // 3) ISO Instant / Offset：2026-11-03T12:34:56.789Z、…+08:00
+            //    采集器 1.2.1 的 sync_at / finish.watermarkTo 走 Date.toISOString()
+            try {
+                return OffsetDateTime.parse(value).atZoneSameInstant(APP_ZONE).toLocalDateTime();
+            } catch (DateTimeParseException ignored) {
+                // 继续尝试下一种格式
+            }
+            try {
+                return Instant.parse(value).atZone(APP_ZONE).toLocalDateTime();
+            } catch (DateTimeParseException ignored) {
+                // 继续尝试下一种格式
+            }
+            // 4) 仅日期：yyyy-MM-dd，时间补零点
             try {
                 return LocalDate.parse(value, DateTimeFormatter.ofPattern(DATE_PATTERN)).atStartOfDay();
             } catch (DateTimeParseException e) {

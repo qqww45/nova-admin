@@ -48,6 +48,23 @@ class JacksonLocalDateTimeTest {
     }
 
     @Test
+    @DisplayName("ISO Instant（带 Z）：按 GMT+8 转成本地时间——采集器 1.2.1 finish 水位用 toISOString()")
+    void isoInstantWithZShouldParseAsGmt8() throws Exception {
+        // 回归背景：2026-11-03 生产 65699 行批次整批落库后，finish SUCCESS
+        // 把 watermarkTo=2026-11-03T…Z 交给 LocalDateTime，被包装成
+        // 「请求体格式错误，请检查 JSON 是否合法」。
+        LocalDateTime value = mapper.readValue("\"2026-10-20T05:45:06.000Z\"", LocalDateTime.class);
+        assertEquals(LocalDateTime.of(2026, 10, 20, 13, 45, 6), value);
+    }
+
+    @Test
+    @DisplayName("ISO Offset：+08:00 按同一瞬间转到 GMT+8")
+    void isoOffsetShouldParseAsGmt8() throws Exception {
+        LocalDateTime value = mapper.readValue("\"2026-10-20T13:45:06+08:00\"", LocalDateTime.class);
+        assertEquals(LocalDateTime.of(2026, 10, 20, 13, 45, 6), value);
+    }
+
+    @Test
     @DisplayName("空串与 null：返回 null 而不是抛异常")
     void blankShouldBeNull() throws Exception {
         assertNull(mapper.readValue("\"\"", LocalDateTime.class));
