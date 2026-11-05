@@ -157,6 +157,18 @@ async function probeService() {
   }
 }
 
+/** 定时同步卡片说明：绑定门槛 + 墙钟调度 + 关窗进托盘 */
+const autoSyncHint = computed(() => {
+  const h = health.value
+  if (!h?.autoSync.enabled) return '已关闭'
+  if (!h.state.bound) return '未绑定，暂不自动同步。绑定后约 1 分钟会自动跑第一次'
+  if (!h.autoSync.lastRunAt) {
+    const grace = h.autoSync.startupGraceSec ?? 60
+    return `已绑定。启动约 ${grace} 秒后会自动跑第一次，无需点击「开始同步」。之后每 ${h.autoSync.intervalHours} 小时按墙上时钟补跑（电脑睡眠醒来也会补）。关窗即可，请勿从托盘退出。`
+  }
+  return `关窗后仍在托盘后台执行。按墙上时钟每 ${h.autoSync.intervalHours} 小时一次，睡眠/重启会按上次自动同步补跑。`
+})
+
 /** 服务状态卡的聚合文案 */
 const serviceState = computed(() => {
   const h = health.value
@@ -427,7 +439,7 @@ function statusLabel(s: SyncProgress['status']) {
               {{ health?.autoSync.enabled ? `每 ${health.autoSync.intervalHours} 小时自动同步` : '已关闭' }}
             </div>
             <div class="sc-sub">
-              {{ health?.state.bound ? '关窗后仍在托盘后台执行' : '未绑定，暂不自动同步' }}
+              {{ autoSyncHint }}
             </div>
           </div>
         </div>
@@ -435,8 +447,11 @@ function statusLabel(s: SyncProgress['status']) {
           <div class="sc-row">
             <span>上次自动同步</span>
             <b>
-              {{ fmtTime(health?.autoSync.lastRunAt) }}
-              <i v-if="health?.autoSync.lastRunOk === false" class="warn">（失败）</i>
+              <template v-if="health?.autoSync.lastRunAt">
+                {{ fmtTime(health.autoSync.lastRunAt) }}
+                <i v-if="health.autoSync.lastRunOk === false" class="warn">（失败）</i>
+              </template>
+              <template v-else>尚未自动同步（不用点「开始同步」）</template>
             </b>
           </div>
           <div class="sc-row">
@@ -494,7 +509,7 @@ function statusLabel(s: SyncProgress['status']) {
         </button>
       </div>
       <p v-if="!history.length" class="hist-empty">
-        还没有同步记录。点上方「开始同步」或等托盘定时同步跑完，历史会记在这里（含失败记录）。
+        还没有同步记录。已绑定的话大约 1 分钟后会自动跑第一次（触发列显示「定时」），无需点「开始同步」。关窗进托盘即可，不要从托盘退出。
       </p>
       <table v-else class="hist-table">
         <thead>

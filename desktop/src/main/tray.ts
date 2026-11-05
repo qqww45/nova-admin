@@ -9,7 +9,8 @@
  *     <li>点窗口关闭按钮 = 隐藏到托盘（退出只能走托盘菜单，防止误关）；</li>
  *     <li>托盘菜单：显示主窗口 / 立即同步并上报 / 开机自启开关（仅打包后）/ 退出；</li>
  *     <li>单击托盘图标 = 显示主窗口，右键 = 菜单；</li>
- *     <li>每 AUTO_SYNC_HOURS 小时自动同步 + 上行（有绑定才执行；同步冲突自动让位）；</li>
+ *     <li>墙钟每 AUTO_SYNC_HOURS 小时自动同步 + 上行（有绑定才执行；同步冲突自动让位；
+ *         启动约 1 分钟后会跑第一次，睡眠/重启后按上次自动同步补跑）；</li>
  *     <li>开机自启默认开启（业务员电脑重启后采集器自动拉起），仅打包后设置。</li>
  * </ul>
  *
@@ -18,6 +19,12 @@
  */
 import { app, BrowserWindow, Menu, Tray, nativeImage } from 'electron'
 import { runSync } from './sync/runner'
+import {
+  AUTO_SYNC_INTERVAL_MS,
+  AUTO_SYNC_STARTUP_GRACE_MS,
+  createAutoSyncScheduler,
+  type AutoSyncScheduler
+} from './sync/autoScheduler'
 import { uploadToNova } from './nova/uploader'
 import { getNovaRuntime } from './configStore'
 import { getDb } from './db'
@@ -26,10 +33,10 @@ import { existsSync } from 'fs'
 import type { AutoSyncStatus } from '../shared/types'
 
 /** 定时同步间隔（小时）：业务员白天开机，2 小时足够近实时又不动金蝶许可 */
-export const AUTO_SYNC_HOURS = 2
+export const AUTO_SYNC_HOURS = AUTO_SYNC_INTERVAL_MS / 3_600_000
 
 let tray: Tray | null = null
-let autoTimer: ReturnType<typeof setInterval> | undefined
+let scheduler: AutoSyncScheduler | undefined
 let autoSyncEnabled = true
 let quitting = false
 
@@ -37,7 +44,6 @@ let quitting = false
 let lastAutoRunAt: string | undefined
 let lastAutoRunOk: boolean | undefined
 let lastAutoRunMessage: string | undefined
-let nextAutoRunAt: string | undefined
 
 /** 退出流程中不再拦截窗口关闭（托盘菜单退出 / 安装更新时置 true） */
 export function markQuitting() {
@@ -61,6 +67,10 @@ function showMainWindow() {
  */
 export async function initTray() {
   if (tray) return
+
+  // 调度器与托盘解耦：托盘创建失败（部分 Linux）时窗口还在，自动同步仍应跑。
+  // 旧实现把 startAutoSyncTimer 放在 new Tray 成功之后，创建失败就永远不会定时。
+  startAutoSync()
 
   // 关窗 = 隐藏到托盘；首次隐藏提示一次，防止用户以为程序退出（后台还在同步）
   let hinted = false
@@ -116,7 +126,6 @@ export async function initTray() {
   rebuildTrayMenu()
   // 单击托盘图标 = 显示主窗口（右键才是菜单），符合 Windows 习惯
   tray.on('click', () => showMainWindow())
-  startAutoSyncTimer()
 }
 
 /** 托盘菜单（开机自启开关状态变化时重建） */
@@ -148,11 +157,24 @@ function rebuildTrayMenu() {
   tray.setContextMenu(Menu.buildFromTemplate(menu))
 }
 
-/** 启动定时同步 */
-function startAutoSyncTimer() {
-  if (autoTimer) return
-  nextAutoRunAt = new Date(Date.now() + AUTO_SYNC_HOURS * 3_600_000).toISOString()
-  autoTimer = setInterval(() => void autoSync('定时'), AUTO_SYNC_HOURS * 3_600_000)
+/**
+ * 启动墙钟定时同步（幂等）。
+ *
+ * <p>不依赖托盘是否创建成功；未绑定则到期空转，绑定后下一拍补跑。
+ */
+export function startAutoSync() {
+  if (!scheduler) {
+    scheduler = createAutoSyncScheduler({
+      getLastAutoRunAtMs: () => parseIsoMs(lastAutoRunAt) ?? lastAutoFromDbMs(),
+      canRun: () => {
+        if (!autoSyncEnabled || quitting) return false
+        const rt = getNovaRuntime()
+        return Boolean(rt.token && rt.bindingId)
+      },
+      run: () => autoSync('定时')
+    })
+  }
+  scheduler.start()
 }
 
 /**
@@ -169,12 +191,11 @@ async function autoSync(trigger: '手动' | '定时') {
   // 「上次 / 下次自动同步」只跟定时周期走；托盘菜单点的不算
   if (trigger === '定时') {
     lastAutoRunAt = new Date().toISOString()
-    nextAutoRunAt = new Date(Date.now() + AUTO_SYNC_HOURS * 3_600_000).toISOString()
   }
   try {
     // 业务锁在同步进行中会直接抛错（"已有同步或其它任务进行中"）——让位即可
     const results = await runSync({ trigger: trigger === '定时' ? 'auto' : 'manual' })
-    const upload = await uploadToNova()
+    const upload = await uploadToNova({ trigger: trigger === '定时' ? 'auto' : 'manual' })
     if (trigger === '定时') {
       lastAutoRunAt = results[results.length - 1]?.finishedAt || lastAutoRunAt
       lastAutoRunOk = results.every((r) => r.status === 'success')
@@ -210,43 +231,58 @@ export function getAutoSyncStatus(): AutoSyncStatus {
   let lastRunMessage = lastAutoRunMessage
 
   if (!lastRunAt) {
-    // 重启后内存清零：从 sync_run 找最近一次定时同步
-    try {
-      const row = getDb()
-        .prepare(
-          `SELECT started_at AS startedAt, status, message FROM sync_run
-           WHERE source = 'auto' ORDER BY id DESC LIMIT 1`
-        )
-        .get() as { startedAt: string; status: string; message: string } | undefined
-      if (row) {
-        lastRunAt = row.startedAt
-        lastRunOk = row.status === 'success'
-        lastRunMessage = row.message
-      }
-    } catch {
-      /* ignore */
+    const row = lastAutoRowFromDb()
+    if (row) {
+      lastRunAt = row.startedAt
+      lastRunOk = row.status === 'success'
+      lastRunMessage = row.message
     }
   }
 
+  const sched = scheduler?.status()
   return {
     enabled: autoSyncEnabled,
-    intervalHours: AUTO_SYNC_HOURS,
+    intervalHours: sched?.intervalHours ?? AUTO_SYNC_HOURS,
+    startupGraceSec: sched?.startupGraceSec ?? AUTO_SYNC_STARTUP_GRACE_MS / 1000,
     lastRunAt,
     lastRunOk,
     lastRunMessage,
-    nextRunAt: nextAutoRunAt
+    nextRunAt: sched ? new Date(sched.nextRunAtMs).toISOString() : undefined
   }
 }
 
 /** 停止定时器（退出时调用） */
 export function stopAutoSync() {
-  if (autoTimer) clearInterval(autoTimer)
-  autoTimer = undefined
+  scheduler?.stop()
+  scheduler = undefined
 }
 
 /** 是否启用定时同步（预留：后续可加设置项） */
 export function isAutoSyncEnabled(): boolean {
   return autoSyncEnabled
+}
+
+function parseIsoMs(iso?: string): number | undefined {
+  if (!iso) return undefined
+  const t = Date.parse(iso)
+  return Number.isNaN(t) ? undefined : t
+}
+
+function lastAutoRowFromDb(): { startedAt: string; status: string; message: string } | undefined {
+  try {
+    return getDb()
+      .prepare(
+        `SELECT started_at AS startedAt, status, message FROM sync_run
+         WHERE source = 'auto' ORDER BY id DESC LIMIT 1`
+      )
+      .get() as { startedAt: string; status: string; message: string } | undefined
+  } catch {
+    return undefined
+  }
+}
+
+function lastAutoFromDbMs(): number | undefined {
+  return parseIsoMs(lastAutoRowFromDb()?.startedAt)
 }
 
 /** ISO 时间 → HH:mm（托盘 tooltip 用） */
