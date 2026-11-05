@@ -11,7 +11,7 @@ import {
   saveNovaUploadResult
 } from '../configStore'
 import {
-  UPLOAD_CHUNK,
+  chunkRows,
   finishBatch,
   formatLocalTime,
   redeemBinding,
@@ -323,7 +323,7 @@ async function doUploadToNova(opts?: { trigger?: SyncTrigger }): Promise<NovaUpl
       clientVersion: app.getVersion()
     })
 
-    for (const chunk of chunked(customers, UPLOAD_CHUNK)) {
+    for (const chunk of chunkRows(customers)) {
       const r = await uploadCustomers(rt.baseUrl, rt.token, {
         batchId,
         rows: chunk.map((row) => ({
@@ -339,7 +339,7 @@ async function doUploadToNova(opts?: { trigger?: SyncTrigger }): Promise<NovaUpl
       skipped += r.skipped
     }
 
-    for (const chunk of chunked(outbounds, UPLOAD_CHUNK)) {
+    for (const chunk of chunkRows(outbounds)) {
       const r = await uploadOutbounds(rt.baseUrl, rt.token, {
         batchId,
         rows: chunk.map((row) => ({
@@ -371,13 +371,15 @@ async function doUploadToNova(opts?: { trigger?: SyncTrigger }): Promise<NovaUpl
       return row.outbound_fid * 100_000 + seq
     })
 
-    for (let offset = 0; offset < lines.length; offset += UPLOAD_CHUNK) {
-      const chunk = lines.slice(offset, offset + UPLOAD_CHUNK)
+    // 分录内码已在切块前算好；用累计偏移取号，避免分块后序号从 0 重来
+    let lineOffset = 0
+    for (const chunk of chunkRows(lines)) {
+      const base = lineOffset
       const r = await uploadLines(rt.baseUrl, rt.token, {
         batchId,
         rows: chunk.map((row, i) => ({
           outboundFid: row.outbound_fid,
-          entryId: lineEntryIds[offset + i],
+          entryId: lineEntryIds[base + i],
           materialNumber: row.material_number || '',
           materialName: row.material_name || '',
           spec: row.spec || '',
@@ -393,6 +395,7 @@ async function doUploadToNova(opts?: { trigger?: SyncTrigger }): Promise<NovaUpl
       received += r.received
       upserted += r.upserted
       skipped += r.skipped
+      lineOffset += chunk.length
     }
 
     const finishedAt = formatLocalTime()
@@ -482,13 +485,6 @@ function uploadTriggerHint(trigger?: SyncTrigger): string {
   if (trigger === 'auto') return '定时同步 · '
   if (trigger === 'command') return '远程指令 · '
   return ''
-}
-
-/** 按大小切块 */
-function chunked<T>(rows: T[], size: number): T[][] {
-  const result: T[][] = []
-  for (let i = 0; i < rows.length; i += size) result.push(rows.slice(i, i + size))
-  return result
 }
 
 /** 取最大 sync_at（ISO 字符串可直接比较） */
