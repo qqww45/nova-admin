@@ -25,7 +25,7 @@ export function describeUpdateError(raw: string): string {
   const code = statusMatch?.[1]
 
   if (code === '404' && /github\.com/.test(url)) {
-    return `更新源不可用：GitHub 仓库为私有，客户端无法匿名读取（404）。请从发布源重新下载完整安装包，或联系运维。 [${detail}]`
+    return `GitHub Releases 上没有找到更新文件（404）。新版本可能尚未发布，请稍后重试，或从发布页下载完整安装包。 [${detail}]`
   }
   if (code === '404') {
     return `更新源上没有找到更新文件（404）：新版本可能尚未发布，或发布地址配置有误。请稍后重试，或联系运维。 [${detail}]`
