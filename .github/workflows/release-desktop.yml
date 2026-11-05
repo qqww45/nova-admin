@@ -179,7 +179,8 @@ jobs:
           echo "上传 feed 文件到 $DIR/release/（服务器在中国时国际链路可能较慢）..."
           if timeout 45 ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" "command -v rsync >/dev/null 2>&1"; then
             echo "      服务器有 rsync：断点续传 + 实时进度"
-            if ! { ok=0; for try in 1 2 3 4; do timeout 14400 rsync -e "ssh $SSH_OPTS" --partial --inplace --progress --timeout=120 --mkpath release/ "$SSH_USER@$SSH_HOST:$DIR/release/" && { ok=1; break; }; echo "      rsync 第 $try 次失败，10 秒后续传"; sleep 10; done; [ "$ok" = 1 ]; }; then
+            # 必须 -r：对目录源默认不递归，只会打印 skipping directory . 然后“成功”传空
+            if ! { ok=0; for try in 1 2 3 4; do timeout 14400 rsync -r -e "ssh $SSH_OPTS" --partial --inplace --progress --timeout=120 --mkpath release/ "$SSH_USER@$SSH_HOST:$DIR/release/" && { ok=1; break; }; echo "      rsync 第 $try 次失败，10 秒后续传"; sleep 10; done; [ "$ok" = 1 ]; }; then
               echo "      上传失败或超时：请检查服务器磁盘空间与公网带宽" >&2
               exit 1
             fi
@@ -226,6 +227,14 @@ jobs:
           ls -lh "$DIR/release"
           echo "容器内探测 latest.yml："
           $DOCKER exec nova-admin-update wget -qO- http://127.0.0.1/latest.yml
+          echo "本机 8081 探测："
+          if command -v curl >/dev/null 2>&1; then
+            curl -sS --max-time 8 -w '\nlocalhost:8081 HTTP %{http_code}\n' http://127.0.0.1:8081/latest.yml || true
+          else
+            wget -qO- http://127.0.0.1:8081/latest.yml || true
+          fi
+          PUB_IP="$(curl -sS --max-time 8 https://ifconfig.me/ip 2>/dev/null || wget -qO- https://ifconfig.me/ip 2>/dev/null || true)"
+          echo "公网 IP：${PUB_IP:-unknown}"
           REMOTE
 
       # 域名未接入 EdgeOne 时不该让发版失败，但日志必须看得见
