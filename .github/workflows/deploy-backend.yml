@@ -79,15 +79,21 @@ jobs:
           SPRING_PROFILES_ACTIVE=prod
           # 单机生产可用内存会话态；多实例部署请删除此行改用 Redis（REDIS_HOST/REDIS_PORT/REDIS_PASSWORD）
           ADMIN_CACHE_TYPE=memory
-          # ---- 以下为 prod 守卫所需，请在服务器 .env 中补齐后重启 ----
-          # DB_HOST=            # MySQL 地址
-          # DB_NAME=admin_db
-          # DB_USERNAME=
-          # DB_PASSWORD=
-          # MAIL_HOST=          # 如 smtp.qq.com；465 端口走 SSL
-          # MAIL_USERNAME=
-          # MAIL_PASSWORD=      # 多数邮件商填"授权码"而非登录密码
-          # MAIL_FROM=          # 发件人，留空取 MAIL_USERNAME
+          # ---- 数据库与邮件：由 GitHub Secrets 注入（prod 守卫所需）----
+          DB_HOST=${{ secrets.DB_HOST }}
+          DB_PORT=${{ secrets.DB_PORT }}
+          DB_NAME=${{ secrets.DB_NAME }}
+          DB_USERNAME=${{ secrets.DB_USERNAME }}
+          DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+          # characterEncoding 必须为 UTF-8（utf8mb4 会被 Connector/J 拒绝）
+          SPRING_DATASOURCE_URL=${{ secrets.SPRING_DATASOURCE_URL }}
+          SPRING_FLYWAY_ENABLED=${{ secrets.SPRING_FLYWAY_ENABLED }}
+          MANAGEMENT_HEALTH_REDIS_ENABLED=${{ secrets.MANAGEMENT_HEALTH_REDIS_ENABLED }}
+          MAIL_HOST=${{ secrets.MAIL_HOST }}
+          MAIL_PORT=${{ secrets.MAIL_PORT }}
+          MAIL_USERNAME=${{ secrets.MAIL_USERNAME }}
+          MAIL_PASSWORD=${{ secrets.MAIL_PASSWORD }}
+          MAIL_FROM=${{ secrets.MAIL_FROM }}
           ADMIN_VERSION=${ADMIN_VERSION::7}
           BASE_IMAGE=${BASE_IMAGE}
           EOF
