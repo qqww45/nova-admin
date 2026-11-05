@@ -8,7 +8,7 @@
   ~
   ~ 说明：
   ~   1. 数据库驱动采用 optional 方式引入，dev 用 SQLite、prod 只需改 application-prod.yml 的 datasource 即可切库；
-  ~   2. Flyway 的 SQLite 支持内置于 flyway-core（社区版），无需额外模块；
+  ~   2. Flyway 10 起数据库模块已拆分：SQLite 支持内置于 flyway-core，MySQL 需额外引入 flyway-mysql；
   ~   3. 构建请使用项目自带的便携 JDK21/Maven（见 README），或自行安装 JDK21 + Maven3.9。
   -->
 <project xmlns="http://maven.apache.org/POM/4.0.0"
@@ -132,6 +132,13 @@
         <dependency>
             <groupId>org.flywaydb</groupId>
             <artifactId>flyway-core</artifactId>
+        </dependency>
+        <!-- MySQL 支持：Flyway 10 起数据库模块拆分，flyway-core 只含 SQLite/通用部分，
+             prod 走 MySQL 必须显式引入，否则启动报 Unsupported Database: MySQL 8.0。
+             版本由 spring-boot-dependencies BOM 统一管理，无需写 version。 -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-mysql</artifactId>
         </dependency>
 
         <!-- ==================== 工具与文档 ==================== -->
