@@ -104,7 +104,8 @@ jobs:
     # 手动 workflow_dispatch 只构建不出 feed：版本号未走标签校验，直接覆盖 latest.yml 有风险
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # 与后端部署同级：国际链路传 ~90MB 安装包可能接近 1 小时
+    timeout-minutes: 240
     # 工作流默认 working-directory 是 desktop/，本任务在仓库根目录操作
     defaults:
       run:
@@ -149,21 +150,30 @@ jobs:
 
           timeout 60 ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" "mkdir -p '$DIR/release'" || { echo "创建 $DIR/release 失败" >&2; exit 1; }
 
-          # docker-compose.yml 一并更新（新增 update 服务时老服务器上的文件还是旧的）
-          FILES="release/latest.yml release/hengzhang-setup-*.exe release/*.blockmap deploy/docker-compose.yml"
-          echo "上传 feed 文件（服务器在中国时国际链路可能较慢，超时 30 分钟）..."
+          # nginx 只读挂载 ./release → html 根目录；安装包必须进 $DIR/release/，
+          # 不能和 docker-compose.yml 一起扁平传到 $DIR/（否则 latest.yml 对容器不可见）。
+          FEED_FILES="release/latest.yml release/hengzhang-setup-*.exe release/*.blockmap"
+          echo "上传 feed 文件到 $DIR/release/（服务器在中国时国际链路可能较慢）..."
           if timeout 45 ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" "command -v rsync >/dev/null 2>&1"; then
             echo "      服务器有 rsync：断点续传 + 实时进度"
             # shellcheck disable=SC2086
-            if ! { ok=0; for try in 1 2 3 4; do timeout 5400 rsync -e "ssh $SSH_OPTS" --partial --inplace --progress --timeout=120 $FILES "$SSH_USER@$SSH_HOST:$DIR/" && { ok=1; break; }; echo "      rsync 第 $try 次失败，10 秒后续传"; sleep 10; done; [ "$ok" = 1 ]; }; then
+            if ! { ok=0; for try in 1 2 3 4; do timeout 5400 rsync -e "ssh $SSH_OPTS" --partial --inplace --progress --timeout=120 $FEED_FILES "$SSH_USER@$SSH_HOST:$DIR/release/" && { ok=1; break; }; echo "      rsync 第 $try 次失败，10 秒后续传"; sleep 10; done; [ "$ok" = 1 ]; }; then
               echo "      上传失败或超时：请检查服务器磁盘空间与公网带宽" >&2
+              exit 1
+            fi
+            if ! { ok=0; for try in 1 2 3 4; do timeout 180 rsync -e "ssh $SSH_OPTS" --partial --inplace --progress --timeout=120 deploy/docker-compose.yml "$SSH_USER@$SSH_HOST:$DIR/" && { ok=1; break; }; echo "      compose rsync 第 $try 次失败，10 秒后续传"; sleep 10; done; [ "$ok" = 1 ]; }; then
+              echo "      docker-compose.yml 上传失败" >&2
               exit 1
             fi
           else
             echo "      服务器无 rsync，改用 scp"
             # shellcheck disable=SC2086
-            if ! { ok=0; for try in 1 2 3 4; do timeout 5400 scp $SCP_OPTS -o Compression=no $FILES "$SSH_USER@$SSH_HOST:$DIR/" && { ok=1; break; }; echo "      scp 第 $try 次失败，10 秒后重试"; sleep 10; done; [ "$ok" = 1 ]; }; then
+            if ! { ok=0; for try in 1 2 3 4; do timeout 5400 scp $SCP_OPTS -o Compression=no $FEED_FILES "$SSH_USER@$SSH_HOST:$DIR/release/" && { ok=1; break; }; echo "      scp 第 $try 次失败，10 秒后重试"; sleep 10; done; [ "$ok" = 1 ]; }; then
               echo "      上传失败或超时：请检查服务器磁盘空间与公网带宽" >&2
+              exit 1
+            fi
+            if ! { ok=0; for try in 1 2 3 4; do timeout 180 scp $SCP_OPTS -o Compression=no deploy/docker-compose.yml "$SSH_USER@$SSH_HOST:$DIR/" && { ok=1; break; }; echo "      compose scp 第 $try 次失败，10 秒后重试"; sleep 10; done; [ "$ok" = 1 ]; }; then
+              echo "      docker-compose.yml 上传失败" >&2
               exit 1
             fi
           fi
@@ -190,6 +200,10 @@ jobs:
           fi
           $COMPOSE up -d update
           $DOCKER ps --filter name=nova-admin-update
+          echo "发布目录内容："
+          ls -lh "$DIR/release"
+          echo "容器内探测 latest.yml："
+          $DOCKER exec nova-admin-update wget -qO- http://127.0.0.1/latest.yml
           REMOTE
 
       # 域名未接入 EdgeOne 时不该让发版失败，但日志必须看得见
