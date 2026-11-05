@@ -104,8 +104,8 @@ jobs:
     # 手动 workflow_dispatch 只构建不出 feed：版本号未走标签校验，直接覆盖 latest.yml 有风险
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
-    # 与后端部署同级：国际链路传 ~90MB 安装包可能接近 1 小时
-    timeout-minutes: 240
+    # 国际链路约 15kB/s 时 90MB 安装包要 1.5 小时以上；须大于单次 rsync 超时
+    timeout-minutes: 480
     # 工作流默认 working-directory 是 desktop/，本任务在仓库根目录操作
     defaults:
       run:
@@ -148,16 +148,38 @@ jobs:
           DIR="${DEPLOY_PATH:-$REMOTE_HOME/nova-admin}"
           echo "发布目录：$DIR"
 
-          timeout 60 ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" "mkdir -p '$DIR/release'" || { echo "创建 $DIR/release 失败" >&2; exit 1; }
+          timeout 60 ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" "bash -s -- '$DIR'" <<'PREP' || { echo "准备 $DIR/release 失败" >&2; exit 1; }
+          set -euo pipefail
+          DIR="$1"
+          # 1.2.3 首次上传：rsync 把 dest 写成了文件，子路径 open 报 ENOENT。
+          if [ -e "$DIR/release" ] && [ ! -d "$DIR/release" ]; then
+            echo "警告：$DIR/release 是文件 ($(wc -c < "$DIR/release") 字节)，删除后重建目录"
+            rm -f "$DIR/release"
+          fi
+          mkdir -p "$DIR/release"
+          if [ ! -w "$DIR/release" ]; then
+            echo "$DIR/release 不可写，尝试修正权限（docker 可能建成 root 目录）"
+            chmod u+w "$DIR/release" 2>/dev/null || true
+            if [ ! -w "$DIR/release" ] && sudo -n true 2>/dev/null; then
+              sudo -n chown "$(id -un):$(id -gn)" "$DIR/release"
+              sudo -n chmod u+rwx "$DIR/release"
+            fi
+          fi
+          if [ ! -d "$DIR/release" ] || [ ! -w "$DIR/release" ]; then
+            echo "无法写入 $DIR/release" >&2
+            ls -lad "$DIR/release" "$DIR" >&2 || true
+            exit 1
+          fi
+          touch "$DIR/release/.hz-write-test"
+          rm -f "$DIR/release/.hz-write-test"
+          ls -lad "$DIR/release"
+          PREP
 
-          # nginx 只读挂载 ./release → html 根目录；安装包必须进 $DIR/release/，
-          # 不能和 docker-compose.yml 一起扁平传到 $DIR/（否则 latest.yml 对容器不可见）。
-          FEED_FILES="release/latest.yml release/hengzhang-setup-*.exe release/*.blockmap"
+          # nginx 只读挂载 ./release → html 根目录。按目录同步，避免多文件 dest 被写成普通文件。
           echo "上传 feed 文件到 $DIR/release/（服务器在中国时国际链路可能较慢）..."
           if timeout 45 ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" "command -v rsync >/dev/null 2>&1"; then
             echo "      服务器有 rsync：断点续传 + 实时进度"
-            # shellcheck disable=SC2086
-            if ! { ok=0; for try in 1 2 3 4; do timeout 5400 rsync -e "ssh $SSH_OPTS" --partial --inplace --progress --timeout=120 $FEED_FILES "$SSH_USER@$SSH_HOST:$DIR/release/" && { ok=1; break; }; echo "      rsync 第 $try 次失败，10 秒后续传"; sleep 10; done; [ "$ok" = 1 ]; }; then
+            if ! { ok=0; for try in 1 2 3 4; do timeout 14400 rsync -e "ssh $SSH_OPTS" --partial --inplace --progress --timeout=120 --mkpath release/ "$SSH_USER@$SSH_HOST:$DIR/release/" && { ok=1; break; }; echo "      rsync 第 $try 次失败，10 秒后续传"; sleep 10; done; [ "$ok" = 1 ]; }; then
               echo "      上传失败或超时：请检查服务器磁盘空间与公网带宽" >&2
               exit 1
             fi
@@ -168,7 +190,7 @@ jobs:
           else
             echo "      服务器无 rsync，改用 scp"
             # shellcheck disable=SC2086
-            if ! { ok=0; for try in 1 2 3 4; do timeout 5400 scp $SCP_OPTS -o Compression=no $FEED_FILES "$SSH_USER@$SSH_HOST:$DIR/release/" && { ok=1; break; }; echo "      scp 第 $try 次失败，10 秒后重试"; sleep 10; done; [ "$ok" = 1 ]; }; then
+            if ! { ok=0; for try in 1 2 3 4; do timeout 14400 scp $SCP_OPTS -o Compression=no release/latest.yml release/hengzhang-setup-*.exe release/*.blockmap "$SSH_USER@$SSH_HOST:$DIR/release/" && { ok=1; break; }; echo "      scp 第 $try 次失败，10 秒后重试"; sleep 10; done; [ "$ok" = 1 ]; }; then
               echo "      上传失败或超时：请检查服务器磁盘空间与公网带宽" >&2
               exit 1
             fi
