@@ -58,8 +58,10 @@
     ],
     "publish": [
       {
-        "provider": "generic",
-        "url": "https://hz-release.s.ci64.com/"
+        "provider": "github",
+        "owner": "qqww45",
+        "repo": "nova-admin",
+        "releaseType": "release"
       }
     ],
     "win": {

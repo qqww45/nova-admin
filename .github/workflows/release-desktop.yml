@@ -1,19 +1,16 @@
 name: Release Desktop
 
 # 桌面端发版：推送 desktop-v* 标签触发（注意与后端/前端的部署流互不影响）。
-# 标签必须等于 desktop/package.json 的版本，例如版本 1.2.1 对应标签 desktop-v1.2.1。
+# 标签必须等于 desktop/package.json 的版本，例如版本 1.2.4 对应标签 desktop-v1.2.4。
 #
-# 本仓库为私有仓库，客户端匿名访问 GitHub（releases.atom / API）只会得到 404，
-# 且更新通道红线是「客户端不内置任何 Token」。因此自动更新不走 GitHub：
-#   1) windows 任务构建 NSIS 安装包，产物同时存档到本仓库 GitHub Releases（鉴权访问，仅运维用）；
-#   2) feed 任务把 latest.yml / 安装包 / blockmap 上传到上海服务器 release/ 目录，
-#      由 deploy/docker-compose.yml 的 update（nginx）容器对外只读提供；
-#      客户端 build.publish 指向该静态发布源（https://hz-release.s.ci64.com/）。
+# 仓库为公开仓。客户端 electron-updater 使用 github provider，匿名读取
+# GitHub Releases 上的 latest.yml（Release 标签为 v<version>，由 electron-builder 创建）。
+# 客户端不内置任何 Token。
 on:
   push:
     tags:
       - "desktop-v*"
-    workflow_dispatch:
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -22,15 +19,14 @@ concurrency:
   group: release-desktop-${{ github.ref }}
   cancel-in-progress: false
 
-defaults:
-  run:
-    working-directory: desktop
-
 jobs:
   windows:
     name: Build installer (Windows)
     runs-on: windows-latest
     timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: desktop
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -60,11 +56,19 @@ jobs:
       - name: Build
         run: npm run build
 
+      # 手动 workflow_dispatch 只构建、不发版，避免未打标签就覆盖 GitHub Release
       - name: Package NSIS installer
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
-        # generic provider 不支持 --publish always，包只落本地目录，上传由后续步骤负责
         run: npx electron-builder --win nsis --publish never
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: npx electron-builder --win nsis --publish always
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -76,137 +80,35 @@ jobs:
             desktop/release/*.blockmap
           if-no-files-found: error
 
-      # 存档用：私有仓库 GitHub Releases 需鉴权访问，客户端不读它。
-      - name: Archive to GitHub Releases
-        if: startsWith(github.ref, 'refs/tags/')
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $tag = "${{ github.ref_name }}"
-          $files = @(Get-ChildItem -Path "release\latest.yml", "release\hengzhang-setup-*.exe", "release\*.blockmap" | ForEach-Object { $_.FullName })
-          if ($files.Count -lt 3) {
-            Write-Error "产物不完整：应为 latest.yml + 安装包 + blockmap，实际 $($files.Count) 个：$($files -join ', ')"
-            exit 1
-          }
-          gh release view $tag *> $null
-          if ($LASTEXITCODE -eq 0) {
-            Write-Host "Release $tag 已存在，覆盖上传资产"
-            gh release upload $tag @files --clobber
-          } else {
-            gh release create $tag @files --title "衡账 $tag" --generate-notes
-          }
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-  feed:
-    name: Publish update feed (Shanghai server)
+  verify:
+    name: Verify GitHub update feed
     needs: windows
-    # 手动 workflow_dispatch 只构建不出 feed：版本号未走标签校验，直接覆盖 latest.yml 有风险
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-    # 工作流默认 working-directory 是 desktop/，本任务在仓库根目录操作
-    defaults:
-      run:
-        working-directory: .
+    timeout-minutes: 10
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Download installer
-        uses: actions/download-artifact@v4
-        with:
-          name: desktop-release
-          path: release
-
-      - name: Upload to server and start feed container
-        env:
-          SSH_HOST: ${{ secrets.SSH_HOST }}
-          SSH_PORT: ${{ secrets.SSH_PORT }}
-          SSH_USER: ${{ secrets.SSH_USER }}
-          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+      - name: Fetch latest.yml anonymously
         run: |
           set -euo pipefail
-          PORT="${SSH_PORT:-22}"
-
-          mkdir -p ~/.ssh
-          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -p "$PORT" -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
-
-          SSH_OPTS="-p $PORT -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4"
-          SCP_OPTS="-P $PORT -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4"
-
-          echo "=========== 发布源上传开始 ==========="
-          echo "目标：$SSH_USER@$SSH_HOST:$PORT"
-          ls -lh release/
-
-          REMOTE_HOME="$(timeout 60 ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" 'echo $HOME' 2>/dev/null || true)"
-          REMOTE_HOME="${REMOTE_HOME:-/home/$SSH_USER}"
-          DIR="${DEPLOY_PATH:-$REMOTE_HOME/nova-admin}"
-          echo "发布目录：$DIR"
-
-          timeout 60 ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" "mkdir -p '$DIR/release'" || { echo "创建 $DIR/release 失败" >&2; exit 1; }
-
-          # docker-compose.yml 一并更新（新增 update 服务时老服务器上的文件还是旧的）
-          FILES="release/latest.yml release/hengzhang-setup-*.exe release/*.blockmap deploy/docker-compose.yml"
-          echo "上传 feed 文件（服务器在中国时国际链路可能较慢，超时 30 分钟）..."
-          if timeout 45 ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" "command -v rsync >/dev/null 2>&1"; then
-            echo "      服务器有 rsync：断点续传 + 实时进度"
-            # shellcheck disable=SC2086
-            if ! { ok=0; for try in 1 2 3 4; do timeout 5400 rsync -e "ssh $SSH_OPTS" --partial --inplace --progress --timeout=120 $FILES "$SSH_USER@$SSH_HOST:$DIR/" && { ok=1; break; }; echo "      rsync 第 $try 次失败，10 秒后续传"; sleep 10; done; [ "$ok" = 1 ]; }; then
-              echo "      上传失败或超时：请检查服务器磁盘空间与公网带宽" >&2
-              exit 1
-            fi
-          else
-            echo "      服务器无 rsync，改用 scp"
-            # shellcheck disable=SC2086
-            if ! { ok=0; for try in 1 2 3 4; do timeout 5400 scp $SCP_OPTS -o Compression=no $FILES "$SSH_USER@$SSH_HOST:$DIR/" && { ok=1; break; }; echo "      scp 第 $try 次失败，10 秒后重试"; sleep 10; done; [ "$ok" = 1 ]; }; then
-              echo "      上传失败或超时：请检查服务器磁盘空间与公网带宽" >&2
-              exit 1
-            fi
-          fi
-          echo "      上传完成"
-
-          echo "确保 update（nginx）容器按最新 compose 文件运行..."
-          timeout 300 ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" "bash -s -- '$DIR'" <<'REMOTE' || { echo "      远程执行失败或超时" >&2; exit 1; }
-          set -euo pipefail
-          DIR="$1"
-          cd "$DIR"
-          DOCKER="docker"
-          if ! timeout 30 docker info >/dev/null 2>&1; then
-            if timeout 30 sudo -n docker info >/dev/null 2>&1; then
-              DOCKER="sudo -n docker"
-            else
-              echo "该 SSH 账号无法访问 Docker 守护进程（usermod -aG docker 或免密 sudo）" >&2
-              exit 1
-            fi
-          fi
-          if $DOCKER compose version >/dev/null 2>&1; then
-            COMPOSE="$DOCKER compose"
-          else
-            COMPOSE="$DOCKER-compose"
-          fi
-          $COMPOSE up -d update
-          $DOCKER ps --filter name=nova-admin-update
-          REMOTE
-
-      # 域名未接入 EdgeOne 时不该让发版失败，但日志必须看得见
-      - name: Verify update feed
-        continue-on-error: true
-        env:
-          FEED_URL: ${{ vars.HENGZHANG_UPDATE_URL || 'https://hz-release.s.ci64.com' }}
-        run: |
-          set -uo pipefail
+          VERSION="${GITHUB_REF_NAME#desktop-v}"
+          YML="https://github.com/qqww45/nova-admin/releases/download/v${VERSION}/latest.yml"
+          EXE="https://github.com/qqww45/nova-admin/releases/download/v${VERSION}/hengzhang-setup-${VERSION}.exe"
+          echo "校验 $YML"
           for i in $(seq 1 12); do
-            CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$FEED_URL/latest.yml" || true)"
-            if [ "$CODE" = "200" ]; then
-              echo "发布源可访问：$FEED_URL/latest.yml"
+            CODE="$(curl -sL -o /tmp/latest.yml -w '%{http_code}' --max-time 20 "$YML" || true)"
+            if [ "$CODE" = "200" ] && grep -q "version: ${VERSION}" /tmp/latest.yml; then
+              echo "latest.yml 可匿名访问："
+              cat /tmp/latest.yml
+              EXE_CODE="$(curl -sI -L -o /dev/null -w '%{http_code}' --max-time 30 "$EXE" || true)"
+              echo "安装包 HEAD HTTP $EXE_CODE"
+              if [ "$EXE_CODE" != "200" ]; then
+                echo "安装包尚未可下载（HTTP $EXE_CODE）：$EXE" >&2
+                exit 1
+              fi
               exit 0
             fi
-            echo "等待发布源就绪（$i/12）：HTTP $CODE"
+            echo "等待 GitHub Release 就绪（$i/12）：HTTP $CODE"
             sleep 5
           done
-          echo "发布源未通：请确认 $FEED_URL 已解析并在 EdgeOne 配置回源到上海服务器 8081 端口" >&2
+          echo "GitHub 更新源未通：$YML" >&2
           exit 1
