@@ -372,11 +372,13 @@ export interface NovaHeartbeat {
 export interface AutoSyncStatus {
   enabled: boolean
   intervalHours: number
+  /** 启动后首次自动同步的宽限（秒）；从未跑过时用 */
+  startupGraceSec?: number
   /** 上次自动同步时间（没有则查 sync_run 里最近一次 auto 记录） */
   lastRunAt?: string
   lastRunOk?: boolean
   lastRunMessage?: string
-  /** 下次预计执行时间（进程内存值，重启后按启动时间估算） */
+  /** 下次预计执行时间（墙钟；重启后按上次 auto 记录或启动宽限重算） */
   nextRunAt?: string
 }
 

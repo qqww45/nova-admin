@@ -6,7 +6,7 @@ import { startCommandLoop, stopCommandLoop } from './nova/commands'
 import { refreshTasks } from './nova/tasks'
 import { closeDb } from './db'
 import { getUserRoots, getAppIconPath } from './paths'
-import { initTray, markQuitting, stopAutoSync } from './tray'
+import { initTray, markQuitting, startAutoSync, stopAutoSync } from './tray'
 import { preferIpv4Loopback, waitForHttpOk, buildStartupErrorHtml } from './devRenderer'
 
 function isDev() {
@@ -90,8 +90,9 @@ app.whenReady().then(() => {
   // 启动即拉一次任务清单：字段集配置可能已被运维改过
   void refreshTasks()
 
-  // 托盘常驻 + 关窗隐藏 + 定时同步（开发模式同样启用，便于验证托盘行为；
-  // 系统不支持托盘时自动退回"关窗即退"）
+  // 墙钟定时同步先于托盘启动：托盘创建失败或图标读取较慢时，调度器不能跟着被推迟。
+  startAutoSync()
+  // 托盘常驻 + 关窗隐藏（开发模式同样启用；系统不支持托盘时退回"关窗即退"）
   void initTray()
 
   // 业务员电脑重启后采集器自动拉起（方案 §8）；托盘菜单可随时关掉（仅打包后）

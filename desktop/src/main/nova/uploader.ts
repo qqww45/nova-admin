@@ -25,7 +25,8 @@ import type {
   NovaBindResult,
   NovaState,
   NovaUploadRecord,
-  NovaUploadResult
+  NovaUploadResult,
+  SyncTrigger
 } from '../../shared/types'
 
 /**
@@ -244,15 +245,15 @@ export function unbindNova(): NovaState {
  */
 let uploadInFlight: Promise<NovaUploadResult> | null = null
 
-export function uploadToNova(): Promise<NovaUploadResult> {
+export function uploadToNova(opts?: { trigger?: SyncTrigger }): Promise<NovaUploadResult> {
   if (uploadInFlight) return uploadInFlight
-  uploadInFlight = doUploadToNova().finally(() => {
+  uploadInFlight = doUploadToNova(opts).finally(() => {
     uploadInFlight = null
   })
   return uploadInFlight
 }
 
-async function doUploadToNova(): Promise<NovaUploadResult> {
+async function doUploadToNova(opts?: { trigger?: SyncTrigger }): Promise<NovaUploadResult> {
   const rt = getNovaRuntime()
   if (!rt.token || !rt.bindingId) {
     const result = { ok: false as const, status: 'unbound' as const, message: '尚未绑定对账平台' }
@@ -408,10 +409,10 @@ async function doUploadToNova(): Promise<NovaUploadResult> {
       startedAt,
       finishedAt,
       costMs: Date.now() - startedMs,
-      message: `客户 ${customers.length}、出库 ${outbounds.length}、分录 ${lines.length}`
+      message: `${uploadTriggerHint(opts?.trigger)}客户 ${customers.length}、出库 ${outbounds.length}、分录 ${lines.length}`
     })
 
-    const message = `已上报 客户 ${customers.length} / 出库 ${outbounds.length} / 分录 ${lines.length}`
+    const message = `${uploadTriggerHint(opts?.trigger)}已上报 客户 ${customers.length} / 出库 ${outbounds.length} / 分录 ${lines.length}`
     saveNovaUploadResult({ ok: true, message, watermark, finishedAt })
     recordUploadRun({
       batchId,
@@ -435,7 +436,7 @@ async function doUploadToNova(): Promise<NovaUploadResult> {
     broadcastNova(result)
     return result
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e)
+    const message = `${uploadTriggerHint(opts?.trigger)}${e instanceof Error ? e.message : String(e)}`
     // 失败也要回报批次，服务端才能看到失败现场；回报本身失败不影响主流程
     try {
       await finishBatch(rt.baseUrl, rt.token, batchId, {
@@ -475,6 +476,12 @@ async function doUploadToNova(): Promise<NovaUploadResult> {
     broadcastNova(result)
     return result
   }
+}
+
+function uploadTriggerHint(trigger?: SyncTrigger): string {
+  if (trigger === 'auto') return '定时同步 · '
+  if (trigger === 'command') return '远程指令 · '
+  return ''
 }
 
 /** 按大小切块 */

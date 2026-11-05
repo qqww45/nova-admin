@@ -81,7 +81,7 @@ async function handle(baseUrl: string, token: string, command: NovaCommand): Pro
           sinceDate: full ? '' : undefined,
           trigger: 'command'
         })
-        const upload = await uploadToNova()
+        const upload = await uploadToNova({ trigger: 'command' })
         message = `${results.map((r) => r.message).join('；')}；上行：${upload.message}`
         break
       }
