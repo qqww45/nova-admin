@@ -19,15 +19,14 @@ concurrency:
   group: release-desktop-${{ github.ref }}
   cancel-in-progress: false
 
-defaults:
-  run:
-    working-directory: desktop
-
 jobs:
   windows:
     name: Build installer (Windows)
     runs-on: windows-latest
     timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: desktop
     steps:
       - name: Checkout
         uses: actions/checkout@v4
