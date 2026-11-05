@@ -16,8 +16,21 @@ interface ApiResult<T> {
 /** 请求超时：金蝶侧可能慢，但 30s 足够；超时后客户端可安全重试（服务端幂等） */
 const TIMEOUT_MS = 30_000
 
-/** 单次上行行数：与后端 @Size(max = 2000) 对齐，再大只会让单请求变慢 */
-export const UPLOAD_CHUNK = 500
+/**
+ * 单次上行行数。
+ *
+ * <p>后端 @Size(max = 2000) 仍是硬上限。现场 500 行一批约 15–16s，
+ * EdgeOne 源站读超时回 HTML 524，客户端再报「返回非 JSON」。
+ * 100 行把单请求压到约原先 1/5，整批改走更多幂等 POST。
+ */
+export const UPLOAD_CHUNK = 100
+
+/** 按块切分上报行；空数组得到空结果，末块允许不足一块。 */
+export function chunkRows<T>(rows: T[], size = UPLOAD_CHUNK): T[][] {
+  const result: T[][] = []
+  for (let i = 0; i < rows.length; i += size) result.push(rows.slice(i, i + size))
+  return result
+}
 
 export interface NovaCustomerRow {
   kdFid: number
