@@ -7,9 +7,9 @@ import { UPLOAD_CHUNK, chunkRows } from './client.ts'
 /** 服务端 Kd*SyncReq.rows 的 @Size(max = 2000) */
 const SERVER_MAX_ROWS = 2000
 
-test('桌面端版本 1.2.5，便于现场区分本次 524 韧性修复', () => {
+test('桌面端版本 1.2.6，便于现场区分增量拉取修复', () => {
   const pkg = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../../package.json'), 'utf8'))
-  assert.equal(pkg.version, '1.2.5')
+  assert.equal(pkg.version, '1.2.6')
 })
 
 test('UPLOAD_CHUNK 远小于服务端上限，避免单请求压到 EdgeOne 源站超时（HTTP 524）', () => {

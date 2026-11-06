@@ -36,7 +36,18 @@ export interface SyncFilterInput {
   lastSweepAt?: string
   /** 当前时间（默认 new Date()，测试可注入） */
   now?: Date
+  /**
+   * 是否附带月度 FDate 回看。默认 true（出库单）。
+   * 客户主数据通常没有 FDate，必须传 false，否则增量过滤会整查询失败。
+   */
+  enableSweep?: boolean
 }
+
+/** 分录 FID IN 上限：超过则退回表头 FilterString，避免 FilterString 过长 */
+export const MAX_LINE_FID_IN = 500
+
+/** 分录拉取计划：表头无变化则跳过，避免月度回看把几万行分录再拉一遍 */
+export type LinePullPlan = { action: 'skip' } | { action: 'query'; filter: string }
 
 /** 水位缓冲：金蝶时间戳粒度与并发修改的容忍窗口 */
 export const WATERMARK_BUFFER_MINUTES = 15
@@ -58,20 +69,57 @@ export function decideSyncFilter(input: SyncFilterInput): SyncFilterDecision {
   }
   const watermark = (input.watermark || '').trim()
   if (!input.supportsModify || !watermark) {
-    // 账套不支持 FModifyDate，或还没有水位（首次同步）→ 不过滤全量拉取，
-    // 与旧行为一致；水位会在本轮成功后建立
+    // 账套不支持 FModifyDate，或还没有水位（首次同步）→ 不过滤全量拉取。
+    // 全量成功且拿到 maxModify 后必须调用 nextModifyWatermark 落盘，
+    // 否则下一轮仍走这里（鸡生蛋）。
     return { mode: 'full', filter: '' }
   }
   const now = input.now || new Date()
   const buffered = minusMinutes(watermark, WATERMARK_BUFFER_MINUTES)
   let filter = `FModifyDate>='${buffered}'`
   let sweepFrom: string | undefined
-  if (shouldSweep(input.lastSweepAt, now)) {
+  if (input.enableSweep !== false && shouldSweep(input.lastSweepAt, now)) {
     sweepFrom = toKdDate(addDays(now, -SWEEP_WINDOW_DAYS))
     // OR 兜底：月度回看按业务日期扫最近 30 天，抓水位边界漏掉的单
     filter = `(${filter} OR FDate>='${sweepFrom}')`
   }
   return { mode: 'fmodify', filter, watermark, sweepFrom }
+}
+
+/**
+ * 金蝶修改水位：只进不退。
+ *
+ * <p>全量成功后必须落盘，否则 {@link decideSyncFilter} 下一轮仍走 full
+ * （鸡生蛋：水位只在 fmodify 模式写 → 永远全量）。
+ * 显式 FDate 纠错：尚无水位时用本轮 maxModify 建水位；已有水位不推进，
+ * 避免子集窗口把水位推过窗口外的改单。
+ */
+export function nextModifyWatermark(input: {
+  mode: SyncFilterDecision['mode']
+  existingWatermark?: string
+  maxModify?: string
+}): string | undefined {
+  const existing = (input.existingWatermark || '').trim()
+  const maxModify = (input.maxModify || '').trim()
+  if (input.mode === 'fdate' && existing) {
+    return existing
+  }
+  if (!maxModify) {
+    return existing || undefined
+  }
+  return maxKdTime(existing, maxModify)
+}
+
+/**
+ * 分录只重建「本轮业务内容变化」的表头。
+ * 月度回看会把窗口内未改的单再拉回来，那些单不得 DELETE+INSERT 分录。
+ */
+export function decideLinePull(headFilter: string, changedFids: number[]): LinePullPlan {
+  if (changedFids.length === 0) return { action: 'skip' }
+  if (changedFids.length <= MAX_LINE_FID_IN) {
+    return { action: 'query', filter: `FID IN (${changedFids.join(',')})` }
+  }
+  return { action: 'query', filter: headFilter }
 }
 
 /** 距上次月度回看是否超过间隔 */
