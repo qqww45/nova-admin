@@ -7,7 +7,13 @@ import { asRow, cellNumber, cellScalar, cellTypeName } from '../kingdee/cells'
 import { loadOutstockMapping } from '../mappingStore'
 import { serverLineFieldKeys } from '../nova/tasks'
 import { tryAcquire, release } from '../businessLock'
-import { decideSyncFilter, maxKdTime, normalizeKdTime } from './filter'
+import { decideLinePull, decideSyncFilter, nextModifyWatermark, maxKdTime, normalizeKdTime } from './filter'
+import {
+  customerContentEqual,
+  headerNeedsLineRebuild,
+  outboundContentEqual,
+  resolveSyncAt
+} from './stamp'
 import type {
   LastSyncStat,
   SyncEntity,
@@ -45,7 +51,50 @@ function setMeta(key: string, value: string) {
     .run(key, value)
 }
 
-async function syncCustomers(sinceDate: string, trigger: SyncTrigger): Promise<SyncProgress> {
+type HeadFetch = { total: number; maxModify: string }
+
+/** 按账套探测 FModifyDate：8 字段失败且 7 字段成功 = 不可用；都失败抛第一次错误 */
+async function fetchWithModifyProbe(
+  supportedKey: string,
+  baseKeys: string,
+  fetch: (fieldKeys: string) => Promise<HeadFetch>
+): Promise<HeadFetch> {
+  const supported = getMeta(supportedKey)
+  if (supported === '1') {
+    return fetch(`${baseKeys},FModifyDate`)
+  }
+  if (supported === '0') {
+    return fetch(baseKeys)
+  }
+  try {
+    const head = await fetch(`${baseKeys},FModifyDate`)
+    setMeta(supportedKey, '1')
+    return head
+  } catch (firstErr) {
+    try {
+      const head = await fetch(baseKeys)
+      setMeta(supportedKey, '0')
+      return head
+    } catch {
+      throw firstErr
+    }
+  }
+}
+
+function persistModifyWatermark(
+  key: string,
+  mode: 'fdate' | 'fmodify' | 'full',
+  maxModify: string
+) {
+  const next = nextModifyWatermark({
+    mode,
+    existingWatermark: getMeta(key),
+    maxModify
+  })
+  if (next) setMeta(key, next)
+}
+
+async function syncCustomers(_sinceDate: string, trigger: SyncTrigger): Promise<SyncProgress> {
   const client = getKingdee()
   const db = getDb()
   const started = nowIso()
@@ -54,9 +103,16 @@ async function syncCustomers(sinceDate: string, trigger: SyncTrigger): Promise<S
   ).run('customer', 'running', 0, '', started, trigger)
 
   try {
-    const fieldKeys = 'FCUSTID,FNumber,FName,FADDRESS,FForbidStatus'
-    let start = 0
-    let total = 0
+    const acctId = getPublicConfig().acctId || ''
+    const supportedKey = `customer_modify_supported:${acctId}`
+    const watermarkKey = `last_customer_modify_watermark:${acctId}`
+    const decision = decideSyncFilter({
+      supportsModify: getMeta(supportedKey) === '1',
+      watermark: getMeta(watermarkKey),
+      enableSweep: false
+    })
+    const filter = decision.filter
+
     const upsert = db.prepare(`
       INSERT INTO customer(fid, fnumber, fname, address, disabled, sync_at)
       VALUES(@fid, @fnumber, @fname, @address, @disabled, @sync_at)
@@ -67,45 +123,84 @@ async function syncCustomers(sinceDate: string, trigger: SyncTrigger): Promise<S
         disabled=excluded.disabled,
         sync_at=excluded.sync_at
     `)
+    const selectPrev = db.prepare(
+      `SELECT fid, fnumber, fname, address, disabled, sync_at FROM customer WHERE fid = ?`
+    )
 
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      const rows = await client.executeBillQuery({
-        FormId: 'BD_Customer',
-        FieldKeys: fieldKeys,
-        FilterString: sinceDate ? '' : '',
-        StartRow: start,
-        Limit: 2000
-      })
-      const tx = db.transaction((batch: unknown[][]) => {
-        for (const raw of batch) {
-          const r = asRow(raw)
-          upsert.run({
-            fid: cellNumber(r[0]),
-            fnumber: cellScalar(r[1]),
-            fname: cellScalar(r[2]),
-            address: cellScalar(r[3]),
-            disabled: cellScalar(r[4]) === 'B' ? 1 : 0,
-            sync_at: nowIso()
-          })
-        }
-      })
-      tx(rows)
-      total += rows.length
-      if (rows.length < 2000) break
-      start += 2000
+    const fetchCustomers = async (fieldKeys: string): Promise<HeadFetch> => {
+      const hasModify = fieldKeys.split(',').includes('FModifyDate')
+      let start = 0
+      let count = 0
+      let modifyMax = ''
+      while (true) {
+        const rows = await client.executeBillQuery({
+          FormId: 'BD_Customer',
+          FieldKeys: fieldKeys,
+          FilterString: filter,
+          StartRow: start,
+          Limit: 2000
+        })
+        const stamp = nowIso()
+        const tx = db.transaction((batch: unknown[][]) => {
+          for (const raw of batch) {
+            const r = asRow(raw)
+            const incoming = {
+              fid: cellNumber(r[0]),
+              fnumber: cellScalar(r[1]),
+              fname: cellScalar(r[2]),
+              address: cellScalar(r[3]),
+              disabled: cellScalar(r[4]) === 'B' ? 1 : 0
+            }
+            const prev = selectPrev.get(incoming.fid) as
+              | {
+                  fid: number
+                  fnumber: string | null
+                  fname: string
+                  address: string | null
+                  disabled: number
+                  sync_at: string | null
+                }
+              | undefined
+            const unchanged = !!(prev && customerContentEqual(prev, incoming))
+            upsert.run({
+              ...incoming,
+              sync_at: resolveSyncAt(unchanged, prev?.sync_at, stamp)
+            })
+            if (hasModify) modifyMax = maxKdTime(modifyMax, normalizeKdTime(r[5]))
+          }
+        })
+        tx(rows)
+        count += rows.length
+        if (rows.length < 2000) break
+        start += 2000
+      }
+      return { total: count, maxModify: modifyMax }
     }
 
+    const head = await fetchWithModifyProbe(
+      supportedKey,
+      'FCUSTID,FNumber,FName,FADDRESS,FForbidStatus',
+      fetchCustomers
+    )
+    persistModifyWatermark(watermarkKey, decision.mode, head.maxModify)
+
+    const modeMsg =
+      decision.mode === 'fmodify'
+        ? `（增量，水位 ${decision.watermark}）`
+        : decision.mode === 'full'
+          ? '（全量）'
+          : ''
     const finished = nowIso()
+    const message = `客户 ${head.total} 条${modeMsg}`
     db.prepare(
       `UPDATE sync_run SET status=?, row_count=?, message=?, finished_at=? WHERE entity=? AND started_at=?`
-    ).run('success', total, 'ok', finished, 'customer', started)
+    ).run('success', head.total, message, finished, 'customer', started)
 
     return {
       entity: 'customer',
       status: 'success',
-      rowCount: total,
-      message: `客户 ${total} 条`,
+      rowCount: head.total,
+      message,
       finishedAt: finished
     }
   } catch (e) {
@@ -153,11 +248,16 @@ function num(v: unknown): number {
   return cellNumber(v)
 }
 
-/** 抓取出库分录；字段集逐套尝试，成功即用。重建范围 = 本轮表头重写的单 */
+/** 抓取出库分录；字段集逐套尝试，成功即用。重建范围 = 本轮业务内容变化的表头 */
 async function syncOutboundLines(
   filter: string,
-  batchStartIso: string
+  changedFids: number[]
 ): Promise<{ lineCount: number; fieldKeys: string; zeroAmount: boolean; firstRowTypes: string }> {
+  const plan = decideLinePull(filter, changedFids)
+  if (plan.action === 'skip') {
+    return { lineCount: 0, fieldKeys: '', zeroAmount: false, firstRowTypes: '' }
+  }
+  const changedSet = new Set(changedFids)
   const client = getKingdee()
   const db = getDb()
   const mapping = loadOutstockMapping()
@@ -174,13 +274,11 @@ async function syncOutboundLines(
       const kinds = fieldKeys.split(',').map((t) => classifyLineToken(t, poField))
       const idx = (kind: LineCol) => kinds.indexOf(kind)
 
-      // 每套字段集尝试前先清掉本轮表头重写过的单的分录，保证可重入。
-      // 双水位增量模式下表头按 FModifyDate 拉回"被修改过的单"，这些单的分录
-      // 整单重建；全量 / 显式日期模式下本轮见到的单同样 sync_at >= batchStartIso，
-      // 语义统一且比旧版"按 fdate 推"更精确。
-      db.prepare(
-        `DELETE FROM outbound_line WHERE outbound_fid IN (SELECT fid FROM outbound WHERE sync_at >= ?)`
-      ).run(batchStartIso)
+      // 只删内容变化的表头的分录。月度回看会把未改的单再拉回来，那些单不得重建。
+      const del = db.prepare(`DELETE FROM outbound_line WHERE outbound_fid = ?`)
+      db.transaction(() => {
+        for (const fid of changedFids) del.run(fid)
+      })()
 
       const insert = db.prepare(`
         INSERT INTO outbound_line(
@@ -202,21 +300,23 @@ async function syncOutboundLines(
         const rows = await client.executeBillQuery({
           FormId: 'SAL_OUTSTOCK',
           FieldKeys: fieldKeys,
-          FilterString: filter,
+          FilterString: plan.filter,
           OrderString: 'FDate ASC',
           StartRow: start,
           Limit: 2000
         })
 
+        const stamp = nowIso()
         const tx = db.transaction((batch: unknown[][]) => {
           for (const raw of batch) {
             const r = asRow(raw)
             const outboundFid = idx('fid') >= 0 ? num(r[idx('fid')]) : 0
-            if (!outboundFid) continue
+            if (!outboundFid || !changedSet.has(outboundFid)) continue
             const qty = idx('qty') >= 0 ? num(r[idx('qty')]) : 0
             const price = idx('price') >= 0 ? num(r[idx('price')]) : 0
             const amount = idx('amount') >= 0 ? num(r[idx('amount')]) : 0
             const rawEntryId = idx('entryId') >= 0 ? num(r[idx('entryId')]) : 0
+            const amountCents = Math.round(amount * 100)
             insert.run({
               outbound_fid: outboundFid,
               // 分录内码可能缺失：留空由服务端按「单据 + 行序号」生成稳定键
@@ -227,19 +327,19 @@ async function syncOutboundLines(
               unit: idx('unit') >= 0 ? cellScalar(r[idx('unit')]) : '',
               qty_milli: Math.round(qty * 1000),
               price_cents: Math.round(price * 100),
-              amount_cents: Math.round(amount * 100),
+              amount_cents: amountCents,
               src_order_no: idx('srcNo') >= 0 ? cellScalar(r[idx('srcNo')]) : '',
               customer_po: idx('po') >= 0 ? cellScalar(r[idx('po')]) : '',
               remark: idx('remark') >= 0 ? cellScalar(r[idx('remark')]) : '',
-              sync_at: nowIso()
+              sync_at: stamp
             })
+            total += 1
+            amountSum += amountCents
           }
         })
         tx(rows)
-        total += rows.length
         if (rows.length) {
           const row = asRow(rows[0])
-          amountSum += Math.round((idx('amount') >= 0 ? num(row[idx('amount')]) : 0) * 100)
           if (!firstRowTypes) firstRowTypes = row.map((c) => cellTypeName(c)).join('|')
           // 数量/单价/金额必须真是数字，否则这套字段集没意义，换下一套
           if (start === 0 && hasNextCandidate) {
@@ -298,11 +398,17 @@ async function syncOutbound(sinceDate: string | undefined, trigger: SyncTrigger)
       lastSweepAt: getMeta(`last_sweep_at:${acctId}`)
     })
     const filter = decision.filter
-    // 本轮开始时间：分录按"本轮表头重写的单"重建的边界
     const batchStartIso = nowIso()
+    const watermarkKey = `last_modify_watermark:${acctId}`
+    const changedFids: number[] = []
+    const fidsWithLines = new Set(
+      (
+        db.prepare(`SELECT DISTINCT outbound_fid AS fid FROM outbound_line`).all() as Array<{
+          fid: number
+        }>
+      ).map((r) => r.fid)
+    )
 
-    let total = 0
-    let maxModify = ''
     const upsert = db.prepare(`
       INSERT INTO outbound(fid, fbillno, fdate, customer_fid, customer_name, amount_cents, status, cancelled, modify_time, sync_at)
       VALUES(@fid, @fbillno, @fdate, @customer_fid, @customer_name, 0, @status, @cancelled, @modify_time, @sync_at)
@@ -316,9 +422,15 @@ async function syncOutbound(sinceDate: string | undefined, trigger: SyncTrigger)
         modify_time=excluded.modify_time,
         sync_at=excluded.sync_at
     `)
+    const selectPrev = db.prepare(
+      `SELECT fid, fbillno, fdate, customer_fid, customer_name, status, cancelled, modify_time, sync_at
+       FROM outbound WHERE fid = ?`
+    )
 
-    /** 拉表头并 upsert；返回 { total, maxModify } */
-    const fetchHead = async (fieldKeys: string) => {
+    /** 拉表头并 upsert；未变行保留 sync_at。返回 { total, maxModify } */
+    const fetchHead = async (fieldKeys: string): Promise<HeadFetch> => {
+      changedFids.length = 0
+      const hasModify = fieldKeys.split(',').includes('FModifyDate')
       let start = 0
       let count = 0
       let modifyMax = ''
@@ -331,23 +443,50 @@ async function syncOutbound(sinceDate: string | undefined, trigger: SyncTrigger)
           StartRow: start,
           Limit: 2000
         })
+        const stamp = nowIso()
         const tx = db.transaction((batch: unknown[][]) => {
           for (const raw of batch) {
             const r = asRow(raw)
-            const modify = normalizeKdTime(r[7])
-            upsert.run({
-              fid: cellNumber(r[0]),
+            const fid = cellNumber(r[0])
+            const prev = selectPrev.get(fid) as
+              | {
+                  fid: number
+                  fbillno: string | null
+                  fdate: string | null
+                  customer_fid: number | null
+                  customer_name: string | null
+                  status: string | null
+                  cancelled: number
+                  modify_time: string | null
+                  sync_at: string | null
+                }
+              | undefined
+            const modify = hasModify ? normalizeKdTime(r[7]) : ''
+            const incoming = {
+              fid,
               fbillno: cellScalar(r[1]),
               fdate: cellScalar(r[2]).slice(0, 10),
               customer_fid: cellNumber(r[3]),
               customer_name: cellScalar(r[4]),
               status: cellScalar(r[5]),
               cancelled: cellScalar(r[6]) === 'B' ? 1 : 0,
-              // FModifyDate 缺失（旧字段集）时清空，避免残留上一轮的旧修改时间
-              modify_time: modify || null,
-              sync_at: nowIso()
+              modify_time: hasModify ? modify || null : prev?.modify_time ?? null
+            }
+            const unchanged = !!(prev && outboundContentEqual(prev, incoming))
+            if (
+              headerNeedsLineRebuild({
+                unchanged,
+                existed: Boolean(prev),
+                hasLines: fidsWithLines.has(fid)
+              })
+            ) {
+              changedFids.push(fid)
+            }
+            upsert.run({
+              ...incoming,
+              sync_at: resolveSyncAt(unchanged, prev?.sync_at, stamp)
             })
-            modifyMax = maxKdTime(modifyMax, modify)
+            if (hasModify) modifyMax = maxKdTime(modifyMax, modify)
           }
         })
         tx(rows)
@@ -358,51 +497,33 @@ async function syncOutbound(sinceDate: string | undefined, trigger: SyncTrigger)
       return { total: count, maxModify: modifyMax }
     }
 
-    // FModifyDate 能力探测：结果按账套缓存。8 字段失败且 7 字段成功 = 该账套没有
-    // FModifyDate（或不可过滤/不可取列）；两个都失败则抛第一次的错误（连接类问题）
     const HEAD_BASE =
       'FID,FBillNo,FDate,FCustomerID,FCustomerID.FName,FDocumentStatus,FCancelStatus'
     const supportedKey = `outstock_modify_supported:${acctId}`
-    const supported = getMeta(supportedKey)
-    let head: { total: number; maxModify: string }
-    if (supported === '1') {
-      head = await fetchHead(`${HEAD_BASE},FModifyDate`)
-    } else if (supported === '0') {
-      head = await fetchHead(HEAD_BASE)
-    } else {
-      try {
-        head = await fetchHead(`${HEAD_BASE},FModifyDate`)
-        setMeta(supportedKey, '1')
-      } catch (firstErr) {
-        try {
-          head = await fetchHead(HEAD_BASE)
-          setMeta(supportedKey, '0')
-        } catch {
-          throw firstErr
-        }
-      }
-    }
-    total = head.total
+    const head = await fetchWithModifyProbe(supportedKey, HEAD_BASE, fetchHead)
+    const total = head.total
 
-    // 水位推进：只进不退。显式 FDate 重拉模式不推进（用户在纠错，水位不动）
-    if (decision.mode === 'fmodify' && head.maxModify) {
-      setMeta(`last_modify_watermark:${acctId}`, maxKdTime(decision.watermark || '', head.maxModify))
-    }
-    if (decision.sweepFrom) {
-      setMeta(`last_sweep_at:${acctId}`, batchStartIso)
-    }
-
-    // 表头完成后同步分录；分录失败不回滚表头，但要在结果里报出来
+    // 表头完成后同步分录；分录失败不回滚表头，也不推进金蝶水位（避免下次增量跳过未完成的分录）
     let lineMsg = ''
+    let linesOk = true
     try {
-      const lines = await syncOutboundLines(filter, batchStartIso)
-      lineMsg = `，分录 ${lines.lineCount} 条`
+      const lines = await syncOutboundLines(filter, changedFids)
+      lineMsg =
+        changedFids.length === 0 ? '，分录无变化' : `，分录 ${lines.lineCount} 条`
       if (lines.zeroAmount) {
         lineMsg += `（警告：金额全为 0，字段映射可能不对；首行类型 ${lines.firstRowTypes}）`
       }
     } catch (e) {
+      linesOk = false
       const msg = e instanceof Error ? e.message : String(e)
       lineMsg = `，分录同步失败：${msg}`
+    }
+
+    if (linesOk) {
+      persistModifyWatermark(watermarkKey, decision.mode, head.maxModify)
+      if (decision.sweepFrom) {
+        setMeta(`last_sweep_at:${acctId}`, batchStartIso)
+      }
     }
 
     const modeMsg =
