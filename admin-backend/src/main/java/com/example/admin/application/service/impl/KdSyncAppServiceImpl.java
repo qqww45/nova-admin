@@ -239,8 +239,8 @@ public class KdSyncAppServiceImpl implements KdSyncAppService {
         KdUpsertResult result = lineRepository.upsertAll(
                 principal.userId(), principal.acctId(), req.getBatchId(), rows);
         accumulateBatch(req.getBatchId(), result);
-        // 表头金额以分录为准：客户端上报的头金额可能为空或未税
-        outboundRepository.recalculateAmountByBatch(principal.userId(), principal.acctId(), req.getBatchId());
+        // 表头金额改到 finish 重算一次：每个分录块都扫本批次全部分录，
+        // 100 行一块时后半程单请求会被拖进 EdgeOne 524。
         LocalDateTime watermark = advanceWatermark(principal.bindingId(), ENTITY_OUTBOUND_LINE, req.getWatermarkTo());
         touchLastSync(principal.bindingId());
         return toResult(result, watermark);
@@ -266,6 +266,9 @@ public class KdSyncAppServiceImpl implements KdSyncAppService {
         update.setCostMs(req.getCostMs());
         update.setMessage(StrUtil.maxLength(req.getMessage(), 900));
         batchRepository.update(update);
+
+        // 分录块不再当场重算：这里做一次即可（成功/失败都算，部分落库的表头也一致）
+        outboundRepository.recalculateAmountByBatch(principal.userId(), principal.acctId(), batchNo);
 
         if (!success) {
             log.warn("批次 {} 失败：{}", batchNo, req.getMessage());
