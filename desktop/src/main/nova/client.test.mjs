@@ -7,6 +7,11 @@ import { UPLOAD_CHUNK, chunkRows } from './client.ts'
 /** 服务端 Kd*SyncReq.rows 的 @Size(max = 2000) */
 const SERVER_MAX_ROWS = 2000
 
+test('桌面端版本 1.2.5，便于现场区分本次 524 韧性修复', () => {
+  const pkg = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../../package.json'), 'utf8'))
+  assert.equal(pkg.version, '1.2.5')
+})
+
 test('UPLOAD_CHUNK 远小于服务端上限，避免单请求压到 EdgeOne 源站超时（HTTP 524）', () => {
   assert.equal(UPLOAD_CHUNK, 100)
   assert.ok(UPLOAD_CHUNK > 0)
@@ -43,17 +48,30 @@ test('chunkRows 默认用 UPLOAD_CHUNK', () => {
   assert.equal(chunks[1].length, 1)
 })
 
-test('上行三实体都按 UPLOAD_CHUNK 切块，水位只在整批成功后推进', () => {
+test('上行三实体都按 UPLOAD_CHUNK 切块，块确认后推进分实体水位，524 会重试', () => {
   const uploader = readFileSync(resolve(import.meta.dirname, 'uploader.ts'), 'utf8')
+  const configStore = readFileSync(resolve(import.meta.dirname, '../configStore.ts'), 'utf8')
   assert.match(uploader, /chunkRows\(customers/)
   assert.match(uploader, /chunkRows\(outbounds/)
   assert.match(uploader, /chunkRows\(lines/)
-  // 分录兜底内码按整批偏移取号，切块后不能从 0 重算
-  assert.match(uploader, /lineEntryIds\[base \+ i\]/)
-  assert.match(uploader, /lineOffset \+= chunk\.length/)
-  // 失败不得推进本地水位（saveNovaUploadResult 成功才带 watermark）
+  assert.match(uploader, /uploadWithRetry/)
+  assert.match(uploader, /retryTransient/)
+  assert.match(uploader, /persistEntityWatermark\('customer'/)
+  assert.match(uploader, /persistEntityWatermark\('outbound'/)
+  assert.match(uploader, /persistEntityWatermark\('line'/)
+  assert.match(uploader, /saveNovaUploadProgress/)
+  // 分录兜底内码用本地 id，半块重跑不得按下标重算
+  assert.match(uploader, /resolveLocalLineEntryId/)
+  assert.match(uploader, /outbound_fid \* 1_000_000/)
+  assert.doesNotMatch(uploader, /lineEntryIds\[base \+ i\]/)
+  assert.doesNotMatch(uploader, /lineOffset \+= chunk\.length/)
+  // 整批成功才推进展示用总水位；失败不得回拨分实体进度
   assert.match(uploader, /saveNovaUploadResult\(\{ ok: true, message, watermark/)
   assert.match(uploader, /saveNovaUploadResult\(\{ ok: false, message, finishedAt \}\)/)
+  assert.match(configStore, /saveNovaUploadProgress/)
+  assert.match(configStore, /uploadWatermarkCustomer/)
+  assert.match(configStore, /uploadWatermarkOutbound/)
+  assert.match(configStore, /uploadWatermarkLine/)
   // 失败仍走 finishBatch FAILED，方便服务端看见现场
   assert.match(uploader, /status: 'FAILED'/)
   // 并发去重：已有上行在跑时复用同一次 Promise

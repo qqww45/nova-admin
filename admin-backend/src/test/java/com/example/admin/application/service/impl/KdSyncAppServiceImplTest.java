@@ -18,6 +18,7 @@ import com.example.admin.domain.repository.KdSyncBatchRepository;
 import com.example.admin.domain.repository.KdSyncTaskRepository;
 import com.example.admin.interfaces.dto.req.KdMappingUploadReq;
 import com.example.admin.interfaces.dto.req.KdOutboundLineSyncReq;
+import com.example.admin.interfaces.dto.req.KdSyncBatchFinishReq;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -182,5 +183,34 @@ class KdSyncAppServiceImplTest {
         assertEquals(1, saved.size());
         assertEquals(longSpec, saved.get(0).getSpec(), "规格必须原样落库，不得截断");
         assertEquals(301, saved.get(0).getSpec().length());
+        verify(outboundRepository, never()).recalculateAmountByBatch(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("分录块不再当场重算表头金额——改到 finish 做一次，避免后半程 524")
+    void finishBatchShouldRecalculateAmountsOnce() {
+        when(kdClientContext.require()).thenReturn(new KdClientIdentity(9L, 7L, "ACCT_A"));
+        KdSyncBatch batch = new KdSyncBatch();
+        batch.setId(1L);
+        batch.setBatchNo("B-FIN");
+        batch.setBindingId(9L);
+        batch.setMode("INCREMENTAL");
+        batch.setRowCount(10);
+        batch.setUpsertCount(10);
+        batch.setSkippedCount(0);
+        when(batchRepository.findByBatchNo("B-FIN")).thenReturn(batch);
+
+        KdSyncBatchFinishReq failed = new KdSyncBatchFinishReq();
+        failed.setStatus("FAILED");
+        failed.setMessage("对账平台返回非 JSON（HTTP 524）");
+        service.finishBatch("B-FIN", failed);
+        verify(outboundRepository).recalculateAmountByBatch(7L, "ACCT_A", "B-FIN");
+
+        KdSyncBatchFinishReq ok = new KdSyncBatchFinishReq();
+        ok.setStatus("SUCCESS");
+        ok.setMessage("已上报");
+        service.finishBatch("B-FIN", ok);
+        verify(outboundRepository, org.mockito.Mockito.times(2))
+                .recalculateAmountByBatch(7L, "ACCT_A", "B-FIN");
     }
 }

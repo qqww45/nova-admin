@@ -8,6 +8,7 @@ import {
   getNovaState,
   getPublicConfig,
   saveNovaBinding,
+  saveNovaUploadProgress,
   saveNovaUploadResult
 } from '../configStore'
 import {
@@ -20,6 +21,7 @@ import {
   uploadLines,
   uploadOutbounds
 } from './client'
+import { retryTransient, safeWatermarkAfterPrefix, uploadWithRetry } from './uploadResilience'
 import type {
   NovaBindInput,
   NovaBindResult,
@@ -36,7 +38,8 @@ import type {
  * 因此这里的所有异常都被吞成结果对象——上行失败绝不能让业务员拿不到对账单。
  *
  * <p>幂等策略：同一批数据重跑安全（服务端按金蝶内码 upsert）。
- * 只有服务端返回 200 才推进本地水位，断电 / 断网后下次自动重传。
+ * 每个实体在块（或半块）确认后立刻推进分实体水位；整批 524 / 超时不得回拨，
+ * 下次只传尚未确认的行。524 / 非 JSON / 超时会有限重试并对半切块。
  */
 
 interface CustomerRow {
@@ -63,6 +66,7 @@ interface OutboundRow {
 }
 
 interface LineRow {
+  id: number
   outbound_fid: number
   entry_id: number | null
   material_number: string | null
@@ -78,18 +82,27 @@ interface LineRow {
   sync_at: string | null
 }
 
+function entitySince(
+  rt: ReturnType<typeof getNovaRuntime>,
+  key: 'uploadWatermarkCustomer' | 'uploadWatermarkOutbound' | 'uploadWatermarkLine'
+): string {
+  return (rt[key] || rt.uploadWatermark || '').trim()
+}
+
 /** 本地待上报行数（用于页面提示） */
 export function pendingUploadRows(): number {
   const db = getDb()
-  const since = getNovaRuntime().uploadWatermark || ''
-  const one = (sql: string) => {
+  const rt = getNovaRuntime()
+  const one = (sql: string, since: string) => {
     const row = db.prepare(sql).get(since) as { n: number } | undefined
     return Number(row?.n) || 0
   }
+  const sql = (table: string) =>
+    `SELECT COUNT(*) AS n FROM ${table} WHERE sync_at IS NOT NULL AND sync_at > ?`
   return (
-    one(`SELECT COUNT(*) AS n FROM customer WHERE sync_at IS NOT NULL AND sync_at > ?`) +
-    one(`SELECT COUNT(*) AS n FROM outbound WHERE sync_at IS NOT NULL AND sync_at > ?`) +
-    one(`SELECT COUNT(*) AS n FROM outbound_line WHERE sync_at IS NOT NULL AND sync_at > ?`)
+    one(sql('customer'), entitySince(rt, 'uploadWatermarkCustomer')) +
+    one(sql('outbound'), entitySince(rt, 'uploadWatermarkOutbound')) +
+    one(sql('outbound_line'), entitySince(rt, 'uploadWatermarkLine'))
   )
 }
 
@@ -261,30 +274,32 @@ async function doUploadToNova(opts?: { trigger?: SyncTrigger }): Promise<NovaUpl
     return result
   }
   const db = getDb()
-  const since = rt.uploadWatermark || ''
+  const customerSince = entitySince(rt, 'uploadWatermarkCustomer')
+  const outboundSince = entitySince(rt, 'uploadWatermarkOutbound')
+  const lineSince = entitySince(rt, 'uploadWatermarkLine')
   const startedAt = formatLocalTime()
   const startedMs = Date.now()
 
   const customers = db
     .prepare(
       `SELECT fid, fnumber, fname, address, disabled, sync_at
-       FROM customer WHERE sync_at IS NOT NULL AND sync_at > ? ORDER BY sync_at`
+       FROM customer WHERE sync_at IS NOT NULL AND sync_at > ? ORDER BY sync_at, fid`
     )
-    .all(since) as CustomerRow[]
+    .all(customerSince) as CustomerRow[]
   const outbounds = db
     .prepare(
       `SELECT fid, fbillno, fdate, customer_fid, customer_name, status, cancelled, amount_cents, modify_time, sync_at
-       FROM outbound WHERE sync_at IS NOT NULL AND sync_at > ? ORDER BY sync_at`
+       FROM outbound WHERE sync_at IS NOT NULL AND sync_at > ? ORDER BY sync_at, fid`
     )
-    .all(since) as OutboundRow[]
+    .all(outboundSince) as OutboundRow[]
   const lines = db
     .prepare(
-      `SELECT outbound_fid, entry_id, material_number, material_name, spec, unit,
+      `SELECT id, outbound_fid, entry_id, material_number, material_name, spec, unit,
               qty_milli, price_cents, amount_cents, src_order_no, customer_po, remark, sync_at
        FROM outbound_line WHERE sync_at IS NOT NULL AND sync_at > ?
-       ORDER BY outbound_fid, id`
+       ORDER BY sync_at, outbound_fid, id`
     )
-    .all(since) as LineRow[]
+    .all(lineSince) as LineRow[]
 
   if (!customers.length && !outbounds.length && !lines.length) {
     const finishedAt = formatLocalTime()
@@ -316,104 +331,129 @@ async function doUploadToNova(opts?: { trigger?: SyncTrigger }): Promise<NovaUpl
   let skipped = 0
 
   try {
-    await startBatch(rt.baseUrl, rt.token, {
-      batchId,
-      entity: 'ALL',
-      mode: 'INCREMENTAL',
-      clientVersion: app.getVersion()
-    })
+    await retryTransient(() =>
+      startBatch(rt.baseUrl, rt.token, {
+        batchId,
+        entity: 'ALL',
+        mode: 'INCREMENTAL',
+        clientVersion: app.getVersion()
+      })
+    )
 
+    let ackedCustomers = 0
     for (const chunk of chunkRows(customers)) {
-      const r = await uploadCustomers(rt.baseUrl, rt.token, {
-        batchId,
-        rows: chunk.map((row) => ({
-          kdFid: row.fid,
-          number: row.fnumber || '',
-          name: row.fname || '',
-          address: row.address || '',
-          disabled: row.disabled ? 1 : 0
-        }))
-      })
-      received += r.received
-      upserted += r.upserted
+      const r = await uploadWithRetry(
+        chunk,
+        (rows) =>
+          uploadCustomers(rt.baseUrl, rt.token, {
+            batchId,
+            rows: rows.map((row) => ({
+              kdFid: row.fid,
+              number: row.fnumber || '',
+              name: row.fname || '',
+              address: row.address || '',
+              disabled: row.disabled ? 1 : 0
+            }))
+          }),
+        {
+          onAck: (acked) => {
+            ackedCustomers += acked.length
+            received += acked.length
+            upserted += acked.length
+            persistEntityWatermark('customer', customers, ackedCustomers)
+          }
+        }
+      )
       skipped += r.skipped
     }
 
+    let ackedOutbounds = 0
     for (const chunk of chunkRows(outbounds)) {
-      const r = await uploadOutbounds(rt.baseUrl, rt.token, {
-        batchId,
-        rows: chunk.map((row) => ({
-          fid: row.fid,
-          billNo: row.fbillno || '',
-          // 本地存的是 yyyy-MM-dd；补零成后端能解析的 LocalDateTime
-          bizDate: row.fdate ? `${row.fdate.slice(0, 10)} 00:00:00` : undefined,
-          customerFid: row.customer_fid ?? undefined,
-          customerName: row.customer_name || '',
-          docStatus: row.status || '',
-          cancelStatus: row.cancelled ? 'B' : 'A',
-          amountCents: Math.round(row.amount_cents || 0),
-          // 金蝶 FModifyDate（服务端 kd_modify_time 的真实语义）；老数据退回本地写入时间
-          modifyTime: row.modify_time ? toLocalTime(row.modify_time) : row.sync_at ? toLocalTime(row.sync_at) : undefined
-        }))
-      })
-      received += r.received
-      upserted += r.upserted
+      const r = await uploadWithRetry(
+        chunk,
+        (rows) =>
+          uploadOutbounds(rt.baseUrl, rt.token, {
+            batchId,
+            rows: rows.map((row) => ({
+              fid: row.fid,
+              billNo: row.fbillno || '',
+              // 本地存的是 yyyy-MM-dd；补零成后端能解析的 LocalDateTime
+              bizDate: row.fdate ? `${row.fdate.slice(0, 10)} 00:00:00` : undefined,
+              customerFid: row.customer_fid ?? undefined,
+              customerName: row.customer_name || '',
+              docStatus: row.status || '',
+              cancelStatus: row.cancelled ? 'B' : 'A',
+              amountCents: Math.round(row.amount_cents || 0),
+              // 金蝶 FModifyDate（服务端 kd_modify_time 的真实语义）；老数据退回本地写入时间
+              modifyTime: row.modify_time ? toLocalTime(row.modify_time) : row.sync_at ? toLocalTime(row.sync_at) : undefined
+            }))
+          }),
+        {
+          onAck: (acked) => {
+            ackedOutbounds += acked.length
+            received += acked.length
+            upserted += acked.length
+            persistEntityWatermark('outbound', outbounds, ackedOutbounds)
+          }
+        }
+      )
       skipped += r.skipped
     }
 
-    // 分录内码兜底：按「单据 + 单内行序号」生成，必须在切块之前算好，
-    // 否则分块后序号从 0 重新开始，会把同一张单的其它行覆盖成同一行
-    const perBillSeq = new Map<number, number>()
-    const lineEntryIds = lines.map((row) => {
-      if (row.entry_id && row.entry_id > 0) return row.entry_id
-      const seq = perBillSeq.get(row.outbound_fid) ?? 0
-      perBillSeq.set(row.outbound_fid, seq + 1)
-      return row.outbound_fid * 100_000 + seq
-    })
-
-    // 分录内码已在切块前算好；用累计偏移取号，避免分块后序号从 0 重来
-    let lineOffset = 0
+    // 分录内码：有金蝶 entry_id 用原值；否则用本地 id 生成稳定键。
+    // 不能再用「当前待上报数组下标」——半块失败后下次只剩后缀，下标会从 0 重来并覆盖已落库行。
+    let ackedLines = 0
     for (const chunk of chunkRows(lines)) {
-      const base = lineOffset
-      const r = await uploadLines(rt.baseUrl, rt.token, {
-        batchId,
-        rows: chunk.map((row, i) => ({
-          outboundFid: row.outbound_fid,
-          entryId: lineEntryIds[base + i],
-          materialNumber: row.material_number || '',
-          materialName: row.material_name || '',
-          spec: row.spec || '',
-          unit: row.unit || '',
-          qtyMilli: Math.round(row.qty_milli || 0),
-          priceCents: Math.round(row.price_cents || 0),
-          amountCents: Math.round(row.amount_cents || 0),
-          srcOrderNo: row.src_order_no || '',
-          customerPo: row.customer_po || '',
-          remark: row.remark || ''
-        }))
-      })
-      received += r.received
-      upserted += r.upserted
+      const r = await uploadWithRetry(
+        chunk,
+        (rows) =>
+          uploadLines(rt.baseUrl, rt.token, {
+            batchId,
+            rows: rows.map((row) => ({
+              outboundFid: row.outbound_fid,
+              entryId: resolveLocalLineEntryId(row),
+              materialNumber: row.material_number || '',
+              materialName: row.material_name || '',
+              spec: row.spec || '',
+              unit: row.unit || '',
+              qtyMilli: Math.round(row.qty_milli || 0),
+              priceCents: Math.round(row.price_cents || 0),
+              amountCents: Math.round(row.amount_cents || 0),
+              srcOrderNo: row.src_order_no || '',
+              customerPo: row.customer_po || '',
+              remark: row.remark || ''
+            }))
+          }),
+        {
+          onAck: (acked) => {
+            ackedLines += acked.length
+            received += acked.length
+            upserted += acked.length
+            persistEntityWatermark('line', lines, ackedLines)
+          }
+        }
+      )
       skipped += r.skipped
-      lineOffset += chunk.length
     }
 
     const finishedAt = formatLocalTime()
-    await finishBatch(rt.baseUrl, rt.token, batchId, {
-      status: 'SUCCESS',
-      rowCount: received,
-      upsertCount: upserted,
-      skippedCount: skipped,
-      // M1 水位语义：客户端完成本次上行的本地时间（服务端只用于展示与单调推进）；
-      // 接入金蝶 FModifyDate 后改为真正的金蝶修改时间
-      // 本地 sync_at 是 Date.toISOString()（带 Z）。后端 LocalDateTime 默认
-      // 不吃 Instant；1.2.1 原样上报后 finish SUCCESS 被包装成「JSON 不合法」。
-      watermarkTo: watermark ? toLocalTime(watermark) : undefined,
-      startedAt,
-      finishedAt,
-      costMs: Date.now() - startedMs,
-      message: `${uploadTriggerHint(opts?.trigger)}客户 ${customers.length}、出库 ${outbounds.length}、分录 ${lines.length}`
-    })
+    await retryTransient(() =>
+      finishBatch(rt.baseUrl, rt.token, batchId, {
+        status: 'SUCCESS',
+        rowCount: received,
+        upsertCount: upserted,
+        skippedCount: skipped,
+        // M1 水位语义：客户端完成本次上行的本地时间（服务端只用于展示与单调推进）；
+        // 接入金蝶 FModifyDate 后改为真正的金蝶修改时间
+        // 本地 sync_at 是 Date.toISOString()（带 Z）。后端 LocalDateTime 默认
+        // 不吃 Instant；1.2.1 原样上报后 finish SUCCESS 被包装成「JSON 不合法」。
+        watermarkTo: watermark ? toLocalTime(watermark) : undefined,
+        startedAt,
+        finishedAt,
+        costMs: Date.now() - startedMs,
+        message: `${uploadTriggerHint(opts?.trigger)}客户 ${customers.length}、出库 ${outbounds.length}、分录 ${lines.length}`
+      })
+    )
 
     const message = `${uploadTriggerHint(opts?.trigger)}已上报 客户 ${customers.length} / 出库 ${outbounds.length} / 分录 ${lines.length}`
     saveNovaUploadResult({ ok: true, message, watermark, finishedAt })
@@ -442,16 +482,18 @@ async function doUploadToNova(opts?: { trigger?: SyncTrigger }): Promise<NovaUpl
     const message = `${uploadTriggerHint(opts?.trigger)}${e instanceof Error ? e.message : String(e)}`
     // 失败也要回报批次，服务端才能看到失败现场；回报本身失败不影响主流程
     try {
-      await finishBatch(rt.baseUrl, rt.token, batchId, {
-        status: 'FAILED',
-        rowCount: received,
-        upsertCount: upserted,
-        skippedCount: skipped,
-        startedAt,
-        finishedAt: formatLocalTime(),
-        costMs: Date.now() - startedMs,
-        message
-      })
+      await retryTransient(() =>
+        finishBatch(rt.baseUrl, rt.token, batchId, {
+          status: 'FAILED',
+          rowCount: received,
+          upsertCount: upserted,
+          skippedCount: skipped,
+          startedAt,
+          finishedAt: formatLocalTime(),
+          costMs: Date.now() - startedMs,
+          message
+        })
+      )
     } catch {
       /* 忽略：网络断了回报也发不出去 */
     }
@@ -479,6 +521,27 @@ async function doUploadToNova(opts?: { trigger?: SyncTrigger }): Promise<NovaUpl
     broadcastNova(result)
     return result
   }
+}
+
+function persistEntityWatermark(
+  entity: 'customer' | 'outbound' | 'line',
+  rows: Array<{ sync_at: string | null }>,
+  ackedCount: number
+) {
+  const wm = safeWatermarkAfterPrefix(
+    rows.map((r) => r.sync_at),
+    ackedCount
+  )
+  if (!wm) return
+  if (entity === 'customer') saveNovaUploadProgress({ watermarkCustomer: wm })
+  else if (entity === 'outbound') saveNovaUploadProgress({ watermarkOutbound: wm })
+  else saveNovaUploadProgress({ watermarkLine: wm })
+}
+
+/** 缺金蝶分录内码时用本地 id 生成稳定键，半块重跑不得改号 */
+function resolveLocalLineEntryId(row: LineRow): number {
+  if (row.entry_id && row.entry_id > 0) return row.entry_id
+  return row.outbound_fid * 1_000_000 + (row.id || 0)
 }
 
 function uploadTriggerHint(trigger?: SyncTrigger): string {

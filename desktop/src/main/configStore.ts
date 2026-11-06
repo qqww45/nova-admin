@@ -15,8 +15,12 @@ interface StoredNova {
   acctName?: string
   lastUploadAt?: string
   lastUploadResult?: string
-  /** 本地上行水位：只有该时间之后写入本地库的行才需要上报 */
+  /** 本地上行水位（整批成功时的展示/兜底）：只有该时间之后写入本地库的行才需要上报 */
   uploadWatermark?: string
+  /** 分实体进度：块确认后立即推进，整批 524 不得回拨 */
+  uploadWatermarkCustomer?: string
+  uploadWatermarkOutbound?: string
+  uploadWatermarkLine?: string
 }
 
 interface StoredConfig {
@@ -169,7 +173,10 @@ export function getNovaRuntime() {
     userId: nova?.userId,
     acctId: nova?.acctId,
     acctName: nova?.acctName,
-    uploadWatermark: nova?.uploadWatermark
+    uploadWatermark: nova?.uploadWatermark,
+    uploadWatermarkCustomer: nova?.uploadWatermarkCustomer,
+    uploadWatermarkOutbound: nova?.uploadWatermarkOutbound,
+    uploadWatermarkLine: nova?.uploadWatermarkLine
   }
 }
 
@@ -218,6 +225,9 @@ export function saveNovaBinding(input: {
       acctName: input.acctName,
       // 只有同一账套的旧水位才可沿用，避免 A 账套的水位污染 B 账套
       uploadWatermark: sameAcct ? cur.nova?.uploadWatermark : undefined,
+      uploadWatermarkCustomer: sameAcct ? cur.nova?.uploadWatermarkCustomer : undefined,
+      uploadWatermarkOutbound: sameAcct ? cur.nova?.uploadWatermarkOutbound : undefined,
+      uploadWatermarkLine: sameAcct ? cur.nova?.uploadWatermarkLine : undefined,
       lastUploadAt: sameAcct ? cur.nova?.lastUploadAt : undefined,
       lastUploadResult: sameAcct ? cur.nova?.lastUploadResult : undefined
     }
@@ -226,11 +236,44 @@ export function saveNovaBinding(input: {
   return getNovaState()
 }
 
-/** 记录一次上报结果（成功才推进水位） */
+/** 水位只进不退（ISO / 本地时间字符串按字典序） */
+function laterWatermark(current?: string, next?: string): string | undefined {
+  if (!next) return current
+  if (!current) return next
+  return next > current ? next : current
+}
+
+/**
+ * 块确认后立刻落下分实体水位。整批失败也保留，避免已 upsert 的行下次重传。
+ */
+export function saveNovaUploadProgress(input: {
+  watermarkCustomer?: string
+  watermarkOutbound?: string
+  watermarkLine?: string
+}) {
+  const cur = readRaw()
+  const nova = cur.nova
+  if (!nova) return getNovaState()
+  writeRaw({
+    ...cur,
+    nova: {
+      ...nova,
+      uploadWatermarkCustomer: laterWatermark(nova.uploadWatermarkCustomer, input.watermarkCustomer),
+      uploadWatermarkOutbound: laterWatermark(nova.uploadWatermarkOutbound, input.watermarkOutbound),
+      uploadWatermarkLine: laterWatermark(nova.uploadWatermarkLine, input.watermarkLine)
+    }
+  })
+  return getNovaState()
+}
+
+/** 记录一次上报结果；整批成功才推进展示用总水位，分实体进度另行持久化 */
 export function saveNovaUploadResult(input: {
   ok: boolean
   message: string
   watermark?: string
+  watermarkCustomer?: string
+  watermarkOutbound?: string
+  watermarkLine?: string
   finishedAt: string
 }) {
   const cur = readRaw()
@@ -242,7 +285,10 @@ export function saveNovaUploadResult(input: {
       ...nova,
       lastUploadAt: input.finishedAt,
       lastUploadResult: input.message.slice(0, 400),
-      uploadWatermark: input.ok && input.watermark ? input.watermark : nova.uploadWatermark
+      uploadWatermark: input.ok && input.watermark ? laterWatermark(nova.uploadWatermark, input.watermark) : nova.uploadWatermark,
+      uploadWatermarkCustomer: laterWatermark(nova.uploadWatermarkCustomer, input.watermarkCustomer),
+      uploadWatermarkOutbound: laterWatermark(nova.uploadWatermarkOutbound, input.watermarkOutbound),
+      uploadWatermarkLine: laterWatermark(nova.uploadWatermarkLine, input.watermarkLine)
     }
   })
   return getNovaState()
