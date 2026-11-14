@@ -4,8 +4,12 @@ import com.baomidou.mybatisplus.extension.plugins.MybatisPlusInterceptor;
 import com.baomidou.mybatisplus.extension.plugins.inner.OptimisticLockerInnerInterceptor;
 import com.baomidou.mybatisplus.extension.plugins.inner.PaginationInnerInterceptor;
 import com.example.admin.common.page.PageQuery;
+import org.apache.ibatis.mapping.DatabaseIdProvider;
+import org.apache.ibatis.mapping.VendorDatabaseIdProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+
+import java.util.Properties;
 
 /**
  * MyBatis-Plus 配置。
@@ -21,6 +25,9 @@ import org.springframework.context.annotation.Configuration;
  *         订单头与明细存在并发出货回写，必须防止后写覆盖先写；
  *         该插件只对标记了 {@code @Version} 的实体生效，
  *         系统管理模块的现有实体（sys_user 等）均无该注解，行为完全不受影响。</li>
+ *     <li>{@link DatabaseIdProvider}：出库表头金额回填是跨库 set-based UPDATE
+ *         （MySQL JOIN / PostgreSQL FROM / SQLite FROM），必须按连接元数据选方言。
+ *         未标注 databaseId 的既有 Mapper 语句不受影响。</li>
  * </ul>
  *
  * @author admin-system
@@ -49,5 +56,22 @@ public class MybatisPlusConfig {
         interceptor.addInnerInterceptor(new OptimisticLockerInnerInterceptor());
 
         return interceptor;
+    }
+
+    /**
+     * 按 JDBC 产品名选择 MyBatis {@code databaseId}。
+     *
+     * @return 厂商映射
+     */
+    @Bean
+    public DatabaseIdProvider databaseIdProvider() {
+        VendorDatabaseIdProvider provider = new VendorDatabaseIdProvider();
+        Properties properties = new Properties();
+        properties.setProperty("MySQL", "mysql");
+        properties.setProperty("MariaDB", "mysql");
+        properties.setProperty("PostgreSQL", "postgresql");
+        properties.setProperty("SQLite", "sqlite");
+        provider.setProperties(properties);
+        return provider;
     }
 }

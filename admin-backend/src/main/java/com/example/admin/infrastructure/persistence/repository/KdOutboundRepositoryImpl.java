@@ -7,9 +7,7 @@ import com.example.admin.domain.model.kd.KdOutbound;
 import com.example.admin.domain.model.kd.KdUpsertResult;
 import com.example.admin.domain.repository.KdOutboundRepository;
 import com.example.admin.infrastructure.persistence.converter.KdConverter;
-import com.example.admin.infrastructure.persistence.mapper.KdOutboundLineMapper;
 import com.example.admin.infrastructure.persistence.mapper.KdOutboundMapper;
-import com.example.admin.infrastructure.persistence.po.KdOutboundLinePo;
 import com.example.admin.infrastructure.persistence.po.KdOutboundPo;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
@@ -33,7 +31,6 @@ public class KdOutboundRepositoryImpl implements KdOutboundRepository {
     private static final int IN_CHUNK = 500;
 
     private final KdOutboundMapper outboundMapper;
-    private final KdOutboundLineMapper lineMapper;
     private final KdConverter converter;
 
     @Override
@@ -73,29 +70,9 @@ public class KdOutboundRepositoryImpl implements KdOutboundRepository {
 
     @Override
     public int recalculateAmountByBatch(Long ownerUserId, String acctId, String batchNo) {
-        List<KdOutboundLinePo> lines = lineMapper.selectList(new LambdaQueryWrapper<KdOutboundLinePo>()
-                .select(KdOutboundLinePo::getOutboundFid, KdOutboundLinePo::getAmountCents)
-                .eq(KdOutboundLinePo::getOwnerUserId, ownerUserId)
-                .eq(KdOutboundLinePo::getAcctId, acctId)
-                .eq(KdOutboundLinePo::getBatchNo, batchNo)
-                .eq(KdOutboundLinePo::getInvalid, 0));
-        if (lines.isEmpty()) {
-            return 0;
-        }
-        Map<Long, Long> sums = new HashMap<>();
-        for (KdOutboundLinePo line : lines) {
-            long amount = line.getAmountCents() == null ? 0L : line.getAmountCents();
-            sums.merge(line.getOutboundFid(), amount, Long::sum);
-        }
-        int updated = 0;
-        for (Map.Entry<Long, Long> entry : sums.entrySet()) {
-            updated += outboundMapper.update(null, new LambdaUpdateWrapper<KdOutboundPo>()
-                    .eq(KdOutboundPo::getOwnerUserId, ownerUserId)
-                    .eq(KdOutboundPo::getAcctId, acctId)
-                    .eq(KdOutboundPo::getKdFid, entry.getKey())
-                    .set(KdOutboundPo::getAmountCents, entry.getValue()));
-        }
-        return updated;
+        // 一条 SQL 按分录汇总回填表头。旧实现先把本批次全部分录载入内存，
+        // 再对每个单头各发一次 UPDATE；数万行时 finishBatch 会被 EdgeOne 524。
+        return outboundMapper.updateAmountFromLinesByBatch(ownerUserId, acctId, batchNo);
     }
 
     @Override

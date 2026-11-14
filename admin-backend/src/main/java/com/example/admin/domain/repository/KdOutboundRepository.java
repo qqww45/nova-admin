@@ -26,9 +26,11 @@ public interface KdOutboundRepository {
     KdUpsertResult upsertAll(Long ownerUserId, String acctId, String batchNo, List<KdOutbound> rows);
 
     /**
-     * 按分录汇总回填表头金额（分录上报完成后调用）。
+     * 按分录汇总回填表头金额（分录上报完成后、{@code finishBatch} 调用一次）。
      *
      * <p>表头金额以分录为准：客户端上报的头金额可能为空或未税，分录才是对账口径。
+     * 实现必须是一条 set-based UPDATE，禁止对本批次每个单头各发一次 UPDATE
+     * （数万行分录会把 {@code POST /kd/sync/batch/{id}/finish} 拖过 EdgeOne 源站超时）。
      *
      * @param ownerUserId 数据归属人
      * @param acctId 账套

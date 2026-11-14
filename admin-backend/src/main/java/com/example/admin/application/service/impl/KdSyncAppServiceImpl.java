@@ -267,7 +267,8 @@ public class KdSyncAppServiceImpl implements KdSyncAppService {
         update.setMessage(StrUtil.maxLength(req.getMessage(), 900));
         batchRepository.update(update);
 
-        // 分录块不再当场重算：这里做一次即可（成功/失败都算，部分落库的表头也一致）
+        // 分录块不再当场重算：这里做一次即可（成功/失败都算，部分落库的表头也一致）。
+        // 实现是一条按分录汇总的 set-based UPDATE，仍留在本事务里：回填失败则批次状态一并回滚。
         outboundRepository.recalculateAmountByBatch(principal.userId(), principal.acctId(), batchNo);
 
         if (!success) {
